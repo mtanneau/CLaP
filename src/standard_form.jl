@@ -103,6 +103,16 @@ function build_standard_form(
     nvar = length(c)
     ncon = length(b)
 
+    # Add Free cones for free variables
+    cflags = ones(Bool, nvar)
+    for (kidx, k) in cones
+        all(cflags[kidx]) || error("Some variables are in two cones")
+        cflags[kidx] .= false
+    end
+    for (j, flag) in enumerate(cflags)
+        flag && push!(cones, ([j], MOI.Reals(1)))
+    end
+
     @info "Problem stats:\n\tVariables  : $nvar\n\tConstraints: $ncon\n\tCones      : $(length(cones))"
     
     return StandardProblem(dst, sparse(arows, acols, avals, ncon, nvar), b, c, c0, cones, int_flags)
