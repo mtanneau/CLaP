@@ -39,9 +39,12 @@ function build_cgcp(
     optimizer::MOI.OptimizerWithAttributes,
     m::Int, n::Int, A::SparseMatrixCSC, b::Vector{Float64}, cones,
     x_::Vector{Float64}, π::Vector{Float64}, π0::Float64;
-    nrm::Symbol = :Conic
+    nrm::Symbol = :Conic;
+    bridge_type::Union{Nothing, Type}=nothing
 )
-    cgcp = JuMP.direct_model(MOI.instantiate(optimizer))
+    # Some solvers do not support Rotated Second Order cones directly,
+    # so we enable bridges as a (hopefully short-term) work-around
+    cgcp = JuMP.direct_model(MOI.instantiate(optimizer, with_bridge_type=bridge_type))
 
     # Create variables
     @variable(cgcp, α[1:n])
@@ -56,20 +59,23 @@ function build_cgcp(
     μ = Vector{JuMP.VariableRef}(undef, n)
     
     for (kidx, k) in cones
+        kd = MOI.dual_set(k)
         d = MOI.dimension(k)
-        if isa(k, MOI.Nonnegatives)
+        if isa(kd, MOI.Nonnegatives)
             @assert d == 1
             λ_ = @variable(cgcp)
             μ_ = @variable(cgcp)
             set_lower_bound(λ_, 0.0)
             set_lower_bound(μ_, 0.0)
-        elseif isa(k, MOI.Nonpositives)
+
+        elseif isa(kd, MOI.Nonpositives)
             @assert d == 1
             λ_ = @variable(cgcp)
             μ_ = @variable(cgcp)
             set_upper_bound(λ_, 0.0)
             set_upper_bound(μ_, 0.0)
-        elseif isa(k, MOI.Reals)
+
+        elseif isa(kd, MOI.Zeros)
             @assert d == 1
             λ_ = @variable(cgcp)
             μ_ = @variable(cgcp)
@@ -77,11 +83,23 @@ function build_cgcp(
             set_lower_bound(μ_, 0.0)
             set_upper_bound(λ_, 0.0)
             set_upper_bound(μ_, 0.0)
-        elseif isa(k, MOI.SecondOrderCone)
+
+        elseif isa(kd, MOI.Reals)
+            @assert d == 1
+            λ_ = @variable(cgcp)
+            μ_ = @variable(cgcp)
+
+        elseif isa(kd, MOI.SecondOrderCone)
             λ_ = @variable(cgcp, [1:d] in SecondOrderCone())
             μ_ = @variable(cgcp, [1:d] in SecondOrderCone())
+
+        elseif isa(kd, MOI.RotatedSecondOrderCone)
+            @assert d >= 2
+            λ_ = @variable(cgcp, [1:d] in RotatedSecondOrderCone())
+            μ_ = @variable(cgcp, [1:d] in RotatedSecondOrderCone())
+
         else
-            error("Cone $(typeof(k)) is not supported in CGCP")
+            error("Primal/dual cones $((typeof(k), typeof(kd))) not supported in CGCP")
         end
         λ[kidx] .= λ_
         μ[kidx] .= μ_
@@ -111,16 +129,39 @@ function build_cgcp(
             if isa(kd, MOI.Nonnegatives)
                 set_normalized_coefficient(normalization, λ[kidx[1]], 1.0)
                 set_normalized_coefficient(normalization, μ[kidx[1]], 1.0)
+
             elseif isa(kd, MOI.Nonpositives)
                 set_normalized_coefficient(normalization, λ[kidx[1]], -1.0)
                 set_normalized_coefficient(normalization, μ[kidx[1]], -1.0)
+
+            elseif isa(kd, MOI.Zeros)
+                # Nothing to add here
+
+            elseif isa(kd, MOI.Reals)
+                # Bound the L1-norm
+                # TODO: these should be removed from CGCP
+                j = kidx[1]
+                t = @variable(cgcp)
+                @constraint(cgcp, t >=  λ[j])
+                @constraint(cgcp, t >= -λ[j])
+                s = @variable(cgcp)
+                @constraint(cgcp, s >=  μ[j])
+                @constraint(cgcp, s >= -μ[j])
+                set_normalized_coefficient(normalization, t, 1.0)
+                set_normalized_coefficient(normalization, s, 1.0)
+
             elseif isa(kd, MOI.SecondOrderCone)
                 set_normalized_coefficient(normalization, λ[kidx[1]], 1.0)
                 set_normalized_coefficient(normalization, μ[kidx[1]], 1.0)
-            elseif isa(kd, MOI.Zeros)
-                # Nothing to add here
+
+            elseif isa(kd, MOI.RotatedSecondOrderCone)
+                set_normalized_coefficient(normalization, λ[kidx[1]], 1.0)
+                set_normalized_coefficient(normalization, λ[kidx[2]], 1.0)
+                set_normalized_coefficient(normalization, μ[kidx[1]], 1.0)
+                set_normalized_coefficient(normalization, μ[kidx[2]], 1.0)
+
             else
-                error("Conic normalization for $(typeof(k)) is not supported")
+                error("Conic normalization for dual cone $(typeof(kd)) is not supported")
             end
         end
 
