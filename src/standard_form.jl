@@ -5,7 +5,7 @@ const MOI = MathOptInterface
 
 # TODO: use a trait instead
 const NONLINEAR_CONE = Union{
-    MOI.SecondOrderCone
+    MOI.SecondOrderCone, MOI.RotatedSecondOrderCone
 }
 const POLYHEDRAL_CONE = Union{
     MOI.Zeros, MOI.Nonnegatives, MOI.Nonpositives
@@ -37,9 +37,12 @@ Convert instance to standard form.
 """
 function build_standard_form(
     optimizer::MOI.OptimizerWithAttributes,
-    src::MOI.ModelLike
+    src::MOI.ModelLike;
+    bridge_type::Union{Nothing, Type}=nothing
 )
-    dst = MOI.instantiate(optimizer)
+    # Some solvers do not support Rotated Second Order cones directly,
+    # so we enable bridges as a (hopefully short-term) work-around
+    dst = MOI.instantiate(optimizer, with_bridge_type=bridge_type)
 
     b = Float64[]
     arows = Int[]
