@@ -39,7 +39,7 @@ function build_cgcp(
     optimizer::MOI.OptimizerWithAttributes,
     m::Int, n::Int, A::SparseMatrixCSC, b::Vector{Float64}, cones,
     x_::Vector{Float64}, π::Vector{Float64}, π0::Float64;
-    nrm::Symbol = :Conic;
+    nrm::Symbol = :Conic,
     bridge_type::Union{Nothing, Type}=nothing
 )
     # Some solvers do not support Rotated Second Order cones directly,
