@@ -43,8 +43,6 @@ function extract_implied_integer(sf::StandardProblem)
         integer_row_flags[i] &= is_int(v)
     end
 
-    @info extrema(denominator.(Rational.(avals)))
-
     has_changed = true
     while has_changed
         has_changed = false
