@@ -27,7 +27,8 @@ mutable struct StandardProblem
     c0::Float64  # Objective constant
 
     cones::Vector{Tuple{Vector{Int}, MOI.AbstractSet}}  # cones
-    int_flags::Vector{Bool}  # Integer flags
+    vartypes::Vector{Bool}  # Integer flags
+    vartypes_implied::Vector{Bool}
 end
 
 """
@@ -55,7 +56,7 @@ function build_standard_form(
     x_old = MOI.get(src, MOI.ListOfVariableIndices())
     nvar = length(x_old)  # Original number of variables
     x = MOI.add_variables(dst, nvar)  # variables in new model
-    int_flags = zeros(Bool, nvar)  # integer flags
+    vartypes = zeros(Bool, nvar)  # integer flags
     @info "Original problem has $nvar variables"
     
     varindices = Dict(x_old .=> 1:nvar)  # Map from old indices to new ones
@@ -98,7 +99,7 @@ function build_standard_form(
             add_to_standard_form!(dst,
                 fun, set,
                 varindices,
-                c, b, arows, acols, avals, cones, int_flags
+                c, b, arows, acols, avals, cones, vartypes
             )
         end
     end
@@ -118,7 +119,12 @@ function build_standard_form(
 
     @info "Problem stats:\n\tVariables  : $nvar\n\tConstraints: $ncon\n\tCones      : $(length(cones))"
     
-    return StandardProblem(dst, sparse(arows, acols, avals, ncon, nvar), b, c, c0, cones, int_flags)
+    return StandardProblem(dst,
+        sparse(arows, acols, avals, ncon, nvar), b,
+        c, c0,
+        cones,
+        vartypes, copy(vartypes)
+    )
 end
 
 """
@@ -130,11 +136,11 @@ function add_to_standard_form!(
     fun::MOI.SingleVariable,
     ::MOI.Integer,
     varindices,
-    c, b, arows, acols, avals, cones, int_flags
+    c, b, arows, acols, avals, cones, vartypes
 )
 
     j = varindices[fun.variable]
-    int_flags[j] = true
+    vartypes[j] = true
 
     MOI.add_constraint(dst, MOI.SingleVariable(MOI.VariableIndex(j)), MOI.Integer())
 
@@ -150,7 +156,7 @@ function add_to_standard_form!(
     fun::MOI.VectorOfVariables,
     set::POLYHEDRAL_CONE,
     varindices,
-    c, b, arows, acols, avals, cones, int_flags
+    c, b, arows, acols, avals, cones, vartypes
 )
     if isa(set, MOI.Zeros)
         set_ = MOI.EqualTo(0.0)
@@ -190,7 +196,7 @@ function add_to_standard_form!(
     fun::MOI.VectorAffineFunction,
     set::POLYHEDRAL_CONE,
     varindices,
-    c, b, arows, acols, avals, cones, int_flags
+    c, b, arows, acols, avals, cones, vartypes
 )
     nvar = length(c)
     ncon = length(b)
@@ -218,7 +224,7 @@ function add_to_standard_form!(
         push!(cones, ([nvar + i], k))
     end
     append!(c, zeros(m))
-    append!(int_flags, zeros(Bool, m))
+    append!(vartypes, zeros(Bool, m))
 
     # Update matrix coefficients
     append!(arows, ncon .+ collect(1:m))
@@ -260,7 +266,7 @@ function add_to_standard_form!(
     fun::MOI.VectorAffineFunction,
     set::MOI.Zeros,
     varindices,
-    c, b, arows, acols, avals, cones, int_flags
+    c, b, arows, acols, avals, cones, vartypes
 )
     nvar = length(c)
     ncon = length(b)
@@ -315,7 +321,7 @@ function add_to_standard_form!(
     fun::MOI.VectorAffineFunction,
     set::NONLINEAR_CONE,
     varindices,
-    c, b, arows, acols, avals, cones, int_flags
+    c, b, arows, acols, avals, cones, vartypes
 )
     nvar = length(c)
     ncon = length(b)
@@ -325,7 +331,7 @@ function add_to_standard_form!(
     # Add slack variables
     s = MOI.add_variables(dst, m)
     append!(c, zeros(m))
-    append!(int_flags, zeros(Bool, m))
+    append!(vartypes, zeros(Bool, m))
 
     # Update matrix coefficients
     append!(arows, ncon .+ collect(1:m))
@@ -371,7 +377,7 @@ function add_to_standard_form!(
     fun::MOI.VectorOfVariables,
     set::NONLINEAR_CONE,
     varindices,
-    c, b, arows, acols, avals, cones, int_flags
+    c, b, arows, acols, avals, cones, vartypes
 )
     m = MOI.dimension(set)
 
