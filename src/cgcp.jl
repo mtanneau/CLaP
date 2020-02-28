@@ -12,7 +12,18 @@ min     c'x
 s.t.    A x = b
           x ∈ K
 ```
-and, for the split `{π'x ⩽ π0} ∧ {π'x ⩾ π0 +1}`, the CGCP writes
+and, for the split `{π'x ⩽ π0} ∧ {π'x ⩾ π0 +1}`.
+
+The CGCP in full writes
+```
+min     α'x - β
+s.t.    α =       λ - u0 * π
+        α = A'v + μ + v0 * π
+        β ⩽         - u0 * π0
+        β ⩽ b'v     + v0 * (π0 + 1)
+        λ, μ ∈ K*, u0, v0 ⩾ 0
+```
+and in compact form
 ```
 min     α'x - β
 s.t.    α =       λ - u0 * π
@@ -40,17 +51,22 @@ function build_cgcp(
     m::Int, n::Int, A::SparseMatrixCSC, b::Vector{Float64}, cones,
     x_::Vector{Float64}, π::Vector{Float64}, π0::Float64;
     nrm::Symbol = :Conic,
+    compact::Bool=true,
     bridge_type::Union{Nothing, Type}=nothing
 )
+    # Sanity checks
+    !(nrm == :Alpha2 && compact) || error("Normalization $nrm is not compatible with compact = $compact")
+
     # Some solvers do not support Rotated Second Order cones directly,
     # so we enable bridges as a (hopefully short-term) work-around
     cgcp = JuMP.direct_model(MOI.instantiate(optimizer, with_bridge_type=bridge_type))
 
     # Create variables
-    @variable(cgcp, α[1:n])
-    @variable(cgcp, β)
-    
-    @variable(cgcp, -1 <= v[1:m] <= 1)  # Put bounds on v to avoid numerical issues
+    if !compact
+        @variable(cgcp, α[1:n])
+        @variable(cgcp, β)
+    end
+    @variable(cgcp, v[1:m])
     @variable(cgcp, u0 >= 0)
     @variable(cgcp, v0 >= 0)
 
@@ -107,12 +123,27 @@ function build_cgcp(
     cgcp[:λ] = λ
     cgcp[:μ] = μ
 
-    # Constraints
-    @constraint(cgcp, f1a, α .==        λ .- (u0 .*  π))
-    @constraint(cgcp, f1b, α .== A'v .+ μ .+ (v0 .*  π))
-    @constraint(cgcp, f2a, β  <=           -  u0  *  π0)
-    @constraint(cgcp, f2b, β  <= b'v       +  v0  * (π0 + 1))
+    # Objective and constraints
+    if compact
+        @variable(cgcp, η1 >= 0)
+        @variable(cgcp, η2 >= 0)
 
+        # Compact form
+        @constraint(cgcp, A'v .+ ( μ .- λ) .+ (u0 + v0) .* π       .== 0.0)
+        @constraint(cgcp, b'v  - (η2 - η1)  + (u0 + v0)  * π0 + v0  == 0.0)
+
+        @objective(cgcp, Min, dot(x_, λ) - u0 * (dot(x_, π) - π0) + η1)
+    
+    else
+        # Full form
+        @constraint(cgcp, f1a, α .==        λ .- (u0 .*  π))
+        @constraint(cgcp, f1b, α .== A'v .+ μ .+ (v0 .*  π))
+        @constraint(cgcp, f2a, β  <=           -  u0  *  π0)
+        @constraint(cgcp, f2b, β  <= b'v       +  v0  * (π0 + 1))
+
+        @objective(cgcp, Min, dot(x_, α) - β)
+    end
+    
     # Normalization
     if nrm == :Alpha2
         # Alpha normalization
@@ -168,9 +199,6 @@ function build_cgcp(
     else
         error("Normalization $nrm is not supported.")
     end
-
-    # Objective
-    @objective(cgcp, Min, dot(x_, α) - β)
 
     return cgcp
 end
