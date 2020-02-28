@@ -1,1 +1,0 @@
-cat ../../dat/instances_misocp.txt | parallel -j1 "julia --project=@. run_cplex_root.jl ../../dat/cblib/{}.cbf > log/{}.log 2>&1"

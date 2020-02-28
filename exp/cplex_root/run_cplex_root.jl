@@ -41,7 +41,7 @@ sf = build_standard_form(micp_optimizer, cbf)
 
 # Solve root node with aggressive L-a-P cuts
 micp = sf.model
-MOI.set(micp, MOI.RawParameter("CPXPARAM_MIP_Limits_CutPasses"), 200)
+MOI.set(micp, MOI.RawParameter("CPXPARAM_MIP_Limits_CutPasses"), ARGS[2])
 MOI.set(micp, MOI.RawParameter("CPXPARAM_MIP_Limits_CutsFactor"), 1e30)
 MOI.set(micp, MOI.RawParameter("CPXPARAM_MIP_Cuts_LiftProj"), 3)
 
