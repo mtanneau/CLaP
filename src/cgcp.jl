@@ -14,7 +14,7 @@ s.t.    A x = b
 ```
 and, for the split `{π'x ⩽ π0} ∧ {π'x ⩾ π0 +1}`.
 
-The CGCP in full writes
+The CGCP in full writes (without the normalization)
 ```
 min     α'x - β
 s.t.    α =       λ - u0 * π
@@ -25,12 +25,10 @@ s.t.    α =       λ - u0 * π
 ```
 and in compact form
 ```
-min     α'x - β
-s.t.    α =       λ - u0 * π
-        α = A'v + μ + v0 * π
-        β ⩽         - u0 * π0
-        β ⩽ b'v     + v0 * (π0 + 1)
-        λ, μ ∈ K*, u0, v0 ⩾ 0
+min     x'λ - u0 * (x'π - π0) + s
+s.t.    A'v + (μ - λ) + (u0 + v0) * π       = 0
+        b'v + (s - t) + (u0 + v0) * π0 + v0 = 0
+        λ, μ ∈ K*, s, t, u0, v0 ⩾ 0
 ```
 
 # Arguments
