@@ -20,7 +20,7 @@ micp_optimizer = MOI.OptimizerWithAttributes(CPLEX.Optimizer,
     "CPXPARAM_MIP_Strategy_MIQCPStrat" => 2,        # 1: NL-B&B, 2:OA
 )
 
-sf = build_standard_form(micp_optimizer, cbf)
+sf = build_standard_form(micp_optimizer, cbf, bridge_type=Float64)
 
 # Solve root node with aggressive L-a-P cuts
 micp = sf.model
