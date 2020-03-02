@@ -26,6 +26,8 @@ mutable struct StandardProblem
     c::Vector{Float64}  # Objective
     c0::Float64  # Objective constant
 
+    var_indices::Vector{MOI.VariableIndex}  # List of MOI variable index
+
     cones::Vector{Tuple{Vector{Int}, MOI.AbstractSet}}  # cones
     vartypes::Vector{Bool}  # Integer flags
     vartypes_implied::Vector{Bool}
@@ -58,15 +60,17 @@ function build_standard_form(
     x = MOI.add_variables(dst, nvar)  # variables in new model
     vartypes = zeros(Bool, nvar)  # integer flags
     @info "Original problem has $nvar variables"
+
+    var_indices = copy(x)
     
-    varindices = Dict(x_old .=> 1:nvar)  # Map from old indices to new ones
+    old_variable_idx_map = Dict(x_old .=> 1:nvar)  # Map from old indices to new ones
 
     # Objective coefficients
     c = zeros(Float64, nvar)
     fobj = MOI.get(src, MOI.ObjectiveFunction{MOI.ScalarAffineFunction{Float64}}())
     c0 = fobj.constant
     for t in fobj.terms
-        j = varindices[t.variable_index]
+        j = old_variable_idx_map[t.variable_index]
         c[j] = t.coefficient
     end
 
@@ -77,8 +81,6 @@ function build_standard_form(
 
     # Objective sense
     MOI.set(dst, MOI.ObjectiveSense(), MOI.get(src, MOI.ObjectiveSense()))
-
-    @info "Objective imported successfully"
 
     # Now, constraints
     ncon = 0
@@ -98,7 +100,7 @@ function build_standard_form(
             # Update standard form
             add_to_standard_form!(dst,
                 fun, set,
-                varindices,
+                old_variable_idx_map, var_indices,
                 c, b, arows, acols, avals, cones, vartypes
             )
         end
@@ -122,6 +124,7 @@ function build_standard_form(
     return StandardProblem(dst,
         sparse(arows, acols, avals, ncon, nvar), b,
         c, c0,
+        var_indices,
         cones,
         vartypes, copy(vartypes)
     )
@@ -135,11 +138,11 @@ function add_to_standard_form!(
     dst::MOI.ModelLike,
     fun::MOI.SingleVariable,
     ::MOI.Integer,
-    varindices,
+    old_variable_idx_map, var_indices,
     c, b, arows, acols, avals, cones, vartypes
 )
 
-    j = varindices[fun.variable]
+    j = old_variable_idx_map[fun.variable]
     vartypes[j] = true
 
     MOI.add_constraint(dst, MOI.SingleVariable(MOI.VariableIndex(j)), MOI.Integer())
@@ -155,7 +158,7 @@ function add_to_standard_form!(
     dst::MOI.ModelLike,
     fun::MOI.VectorOfVariables,
     set::POLYHEDRAL_CONE,
-    varindices,
+    old_variable_idx_map, var_indices,
     c, b, arows, acols, avals, cones, vartypes
 )
     if isa(set, MOI.Zeros)
@@ -172,7 +175,7 @@ function add_to_standard_form!(
     end
 
     for j_old in fun.variables
-        j = varindices[j_old]
+        j = old_variable_idx_map[j_old]
 
         MOI.add_constraint(dst,
             MOI.SingleVariable(MOI.VariableIndex(j)),
@@ -195,7 +198,7 @@ function add_to_standard_form!(
     dst::MOI.ModelLike,
     fun::MOI.VectorAffineFunction,
     set::POLYHEDRAL_CONE,
-    varindices,
+    old_variable_idx_map, var_indices,
     c, b, arows, acols, avals, cones, vartypes
 )
     nvar = length(c)
@@ -215,6 +218,8 @@ function add_to_standard_form!(
 
     # Add slack variables
     s = MOI.add_variables(dst, m)
+    append!(var_indices, s)
+
     # Set bounds on slack variables
     for i in 1:m
         MOI.add_constraint(dst,
@@ -238,7 +243,7 @@ function add_to_standard_form!(
     ]
     for t in fun.terms
         i = t.output_index
-        j = varindices[t.scalar_term.variable_index]
+        j = old_variable_idx_map[t.scalar_term.variable_index]
         v = t.scalar_term.coefficient
         push!(funs_[i].terms, MOI.ScalarAffineTerm(v, MOI.VariableIndex(j)))
         
@@ -265,7 +270,7 @@ function add_to_standard_form!(
     dst::MOI.ModelLike,
     fun::MOI.VectorAffineFunction,
     set::MOI.Zeros,
-    varindices,
+    old_variable_idx_map, var_indices,
     c, b, arows, acols, avals, cones, vartypes
 )
     nvar = length(c)
@@ -285,7 +290,7 @@ function add_to_standard_form!(
     ]
     for t in fun.terms
         i = t.output_index
-        j = varindices[t.scalar_term.variable_index]
+        j = old_variable_idx_map[t.scalar_term.variable_index]
         v = t.scalar_term.coefficient
         push!(funs_[i].terms, MOI.ScalarAffineTerm(v, MOI.VariableIndex(j)))
 
@@ -320,7 +325,7 @@ function add_to_standard_form!(
     dst::MOI.ModelLike,
     fun::MOI.VectorAffineFunction,
     set::NONLINEAR_CONE,
-    varindices,
+    old_variable_idx_map, var_indices,
     c, b, arows, acols, avals, cones, vartypes
 )
     nvar = length(c)
@@ -330,6 +335,7 @@ function add_to_standard_form!(
 
     # Add slack variables
     s = MOI.add_variables(dst, m)
+    append!(var_indices, s)
     append!(c, zeros(m))
     append!(vartypes, zeros(Bool, m))
 
@@ -349,7 +355,7 @@ function add_to_standard_form!(
     ]
     for t in fun.terms
         i = t.output_index
-        j = varindices[t.scalar_term.variable_index]
+        j = old_variable_idx_map[t.scalar_term.variable_index]
         v = t.scalar_term.coefficient
         push!(funs_[i].terms, MOI.ScalarAffineTerm(v, MOI.VariableIndex(j)))
 
@@ -376,13 +382,13 @@ function add_to_standard_form!(
     dst::MOI.ModelLike,
     fun::MOI.VectorOfVariables,
     set::NONLINEAR_CONE,
-    varindices,
+    old_variable_idx_map, var_indices,
     c, b, arows, acols, avals, cones, vartypes
 )
     m = MOI.dimension(set)
 
     x_ = [
-        MOI.VariableIndex(varindices[v])
+        MOI.VariableIndex(old_variable_idx_map[v])
         for v in fun.variables
     ]
 
@@ -390,7 +396,7 @@ function add_to_standard_form!(
     MOI.add_constraint(dst, MOI.VectorOfVariables(x_), set)
 
     # Record cone
-    push!(cones, ([varindices[v] for v in fun.variables], set))
+    push!(cones, ([old_variable_idx_map[v] for v in fun.variables], set))
 
     return nothing
 end
