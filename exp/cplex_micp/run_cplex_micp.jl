@@ -33,7 +33,7 @@ MOI.optimize!(micp)
 @show MOI.get(micp, MOI.TerminationStatus())    # Termination status
 @show MOI.get(micp, MOI.ObjectiveBound())       # Lower bound
 
-# TODO: export solution
-x_micp = MOI.get(micp, MOI.VariablePrimal(), [MOI.VariableIndex(j) for j in 1:length(sf.c)])
+# Export solution
+x_micp = MOI.get(micp, MOI.VariablePrimal(), sf.var_indices)
 
 writedlm(joinpath(@__DIR__, "res/$finst.sol"), x_micp)
