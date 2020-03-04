@@ -55,6 +55,10 @@ function parse_commandline(cl_args)
             help = "Normalization condition"
             arg_type = Symbol
             default = :Conic
+        "--Rounds"
+            help = "Maximum number of cutting plane rounds"
+            arg_type = Int
+            default = typemax(Int)
         "--TimeLimit"
             help = "Time limit (in seconds)"
             arg_type = Float64
@@ -70,7 +74,7 @@ end
 function run_landp(
     finst::String,
     micp_optimizer, cgcp_optimizer,
-    time_limit::Float64, nrm::Symbol;
+    time_limit::Float64, nrm::Symbol, max_rounds::Int;
     verbose::Bool=true, timer=TimerOutput()
 )
     # Read model from file
@@ -98,11 +102,6 @@ function run_landp(
     ncalls = Ref(0)
     ncuts_tot = Ref(0)
     ncgcp_nocut = Ref(0)
-
-    # nrounds = Ref(0)
-    max_rounds = 10
-
-    @info max_rounds
 
     # Set callback
     # TODO: put the callback into a function of its own
@@ -388,17 +387,17 @@ function main()
         run_landp(
             cl_args["finst"],
             micp_optimizer, cgcp_optimizer,
-            30.0, cl_args["Normalization"],
+            30.0, cl_args["Normalization"], cl_args["Rounds"],
             verbose=false, timer = to
         )
     end
 
     # Real run
     to = TimerOutput()
-    run_landp(
+    @timeit to "L-and-P" run_landp(
         cl_args["finst"],
         micp_optimizer, cgcp_optimizer,
-        cl_args["TimeLimit"], cl_args["Normalization"],
+        cl_args["TimeLimit"], cl_args["Normalization"], cl_args["Rounds"],
         timer=to
     )
 
