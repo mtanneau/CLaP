@@ -160,9 +160,9 @@ version = "0.7.8"
 
 [[MbedTLS]]
 deps = ["Dates", "MbedTLS_jll", "Random", "Sockets"]
-git-tree-sha1 = "709797fadd2d3b7e3f040a9f6e12726a6d6d2bf5"
+git-tree-sha1 = "a9e2221f06b42f56052f43ad7edecb01d0ef5ab4"
 uuid = "739be429-bea8-5141-9913-cc70e7f3736d"
-version = "1.0.0"
+version = "1.0.1"
 
 [[MbedTLS_jll]]
 deps = ["Libdl", "Pkg"]
@@ -267,6 +267,12 @@ uuid = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
 git-tree-sha1 = "9250ef9b01b66667380cf3275b3f7488d0e25faf"
 uuid = "b718987f-49a8-5099-9789-dcd902bef87d"
 version = "1.0.1"
+
+[[TimerOutputs]]
+deps = ["Printf"]
+git-tree-sha1 = "311765af81bbb48d7bad01fb016d9c328c6ede03"
+uuid = "a759f4b9-e2f1-59dc-863e-4aeb61b1ea8f"
+version = "0.5.3"
 
 [[TranscodingStreams]]
 deps = ["Random", "Test"]

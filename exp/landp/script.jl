@@ -4,6 +4,7 @@ using SparseArrays
 
 using ArgParse
 using DelimitedFiles
+using TimerOutputs
 
 # Solvers
 import CPLEX
@@ -70,17 +71,17 @@ function run_landp(
     finst::String,
     micp_optimizer, cgcp_optimizer,
     time_limit::Float64, nrm::Symbol;
-    verbose::Bool=true
+    verbose::Bool=true, timer=TimerOutput()
 )
     # Read model from file
     cbf = MOI.FileFormats.CBF.Model()
     MOI.read_from_file(cbf, finst)
 
     # Convert to standard form
-    sf = build_standard_form(micp_optimizer, cbf, bridge_type=Float64)
+    @timeit timer "Build SF" sf = build_standard_form(micp_optimizer, cbf, bridge_type=Float64)
 
     # TODO: add pre-processing option
-    extract_implied_integer(sf)
+    @timeit timer "Prepross" extract_implied_integer(sf)
     @info "Pre-processing: $(sum(sf.vartypes)) integer variables ($(sum(sf.vartypes_implied)) implied integers)"
 
     # TODO: add cut validity checker option
@@ -94,21 +95,19 @@ function run_landp(
     MOI.set(micp, MOI.Silent(), !verbose)
 
     # Book-keeping
-    tbuild = Ref(0.0)
-    tsolve = Ref(0.0)
     ncalls = Ref(0)
     ncuts_tot = Ref(0)
     ncgcp_nocut = Ref(0)
 
     # nrounds = Ref(0)
-    max_rounds = 200
+    max_rounds = 10
 
     @info max_rounds
 
     # Set callback
     # TODO: put the callback into a function of its own
     MOI.set(micp, MOI.UserCutCallback(),
-        cb_data -> begin
+        cb_data -> begin @timeit timer "Callback" begin
             ncalls[] += 1
             ncalls[] <= max_rounds || return nothing
 
@@ -116,7 +115,7 @@ function run_landp(
             x_ = MOI.get(micp, MOI.CallbackVariablePrimal(cb_data), x)
 
             # Clean x_
-            for j in 1:n
+            @timeit timer "Cleaning" for j in 1:n
                 if abs(x_[j]) <= 1e-7
                     x_[j] = 0.0
                 end
@@ -127,7 +126,7 @@ function run_landp(
             f .*= sf.vartypes
             p = sortperm(f, rev=true)
 
-            for j in p
+            @timeit timer "Cut-generation" for j in p
                 # Skip non-fractional variables
                 f[j] >= 1e-4 || continue
                 
@@ -138,7 +137,7 @@ function run_landp(
 
                 # Build CGCP
                 # TODO: make this faster
-                tbuild[] += @elapsed cgcp = build_cgcp(
+                @timeit timer "CGCP-build" cgcp = build_cgcp(
                     cgcp_optimizer,
                     m, n, sf.A, sf.b, sf.cones,
                     x_, pi, pi0,
@@ -148,7 +147,7 @@ function run_landp(
                 cgcp_moi = backend(cgcp)
 
                 # Solve CGCP
-                tsolve[] += @elapsed MOI.optimize!(cgcp_moi)
+                @timeit timer "CGCP-solve" MOI.optimize!(cgcp_moi)
 
                 # Check termination status
                 st = MOI.get(cgcp_moi, MOI.TerminationStatus())
@@ -179,7 +178,7 @@ function run_landp(
                 a2 = sf.A'v .+ v0 .* pi
 
                 # Check validity of conic multipliers
-                for (kidx, k) in sf.cones
+                @timeit timer "CGCP-clean λ" for (kidx, k) in sf.cones
                     kd = MOI.dual_set(k)
 
                     if isa(kd, MOI.Nonnegatives)
@@ -232,7 +231,7 @@ function run_landp(
                 σ = α - a2
 
                 # Check that \mu ∈ K*
-                for (kidx, k) in sf.cones
+                @timeit timer "CGCP-clean μ" for (kidx, k) in sf.cones
                     kd = MOI.dual_set(k)
 
                     if isa(kd, MOI.Nonnegatives)
@@ -267,7 +266,7 @@ function run_landp(
 
                 # Strengthening
                 # TODO: add option to strengthen or not
-                if u0 + v0 > 1e-4
+                @timeit timer "Strengthen" if u0 + v0 > 1e-4
                     Atv = sf.A'v
                     for (kidx, k) in sf.cones
                         
@@ -282,7 +281,7 @@ function run_landp(
                 end
 
                 # TODO: Proper cleaning and re-scaling for numerics
-                for j_ in 1:n
+                @timeit timer "CGCP-clean α" for j_ in 1:n
                     if abs(α[j_]) <= 1e-7 
                         α[j_] = 0.0
                     end
@@ -297,7 +296,7 @@ function run_landp(
                 z >= -1e-6 || (@error("Optimal solution is cut by $z", norm(x_, 2), norm(α, 2), β, u0, v0, j, x_[j], f[j]); ncgcp_nocut[] += 1; continue)
 
                 # Submit the cut
-                MOI.submit(
+                @timeit timer "Submit" MOI.submit(
                     micp,
                     MOI.UserCut(cb_data),
                     MOI.ScalarAffineFunction(MOI.ScalarAffineTerm.(α ./ r, x), 0.0),
@@ -308,14 +307,14 @@ function run_landp(
 
             end  # cut-generation loop
 
-        end  # callback function
+        end end  # timer and callback function
     )
 
     # Solve
     MOI.optimize!(micp)
 
     # Result log
-    @info "User callback was called $(ncalls[]) times" tbuild[] tsolve[] ncuts_tot[] ncgcp_nocut[]
+    @info "User callback was called $(ncalls[]) times" ncuts_tot[] ncgcp_nocut[]
 
     verbose && @show MOI.get(micp, MOI.TerminationStatus())
     verbose && @show MOI.get(micp, MOI.ObjectiveBound())
@@ -381,22 +380,28 @@ function main()
     end
 
     # warm-up run
+    to = TimerOutput()
     @info "Warming up..."
     with_logger(Logging.NullLogger()) do  # this will de-activate logs
         run_landp(
             cl_args["finst"],
             micp_optimizer, cgcp_optimizer,
             30.0, cl_args["Normalization"],
-            verbose=false
+            verbose=false, timer = to
         )
     end
 
     # Real run
+    to = TimerOutput()
     run_landp(
         cl_args["finst"],
         micp_optimizer, cgcp_optimizer,
-        cl_args["TimeLimit"], cl_args["Normalization"]
+        cl_args["TimeLimit"], cl_args["Normalization"],
+        timer=to
     )
+
+    display(to)
+    println()
 
     return nothing
 end
