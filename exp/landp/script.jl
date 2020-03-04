@@ -346,7 +346,8 @@ function main()
             "Heuristics" => 0,
             "Cuts" => 0,
             "MIQCPMethod" => 1,
-            "NodeLimit" => 1
+            "NodeLimit" => 1,
+            "QCPDual" => 0
         )
     else
         error("MICP solver $(cl_args["MICPSolver"]) is not supported.\n Possible values are `CPLEX` and `Gurobi`.")
@@ -366,7 +367,8 @@ function main()
             () -> Gurobi.Optimizer(GRB_ENV),
             "Threads" => 1,
             "OutputFlag" => 0,
-            "Presolve" => 0
+            "Presolve" => 0,
+            "QCPDual" => 0
         )
 
     elseif cl_args["CGCPSolver"] == :Mosek
