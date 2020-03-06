@@ -82,7 +82,7 @@ function landp_callback(
             cgcp_optimizer,
             m, n, sf.A, sf.b, sf.cones,
             x_, pi, pi0,
-            nrm=:Conic,
+            nrm=nrm,
             bridge_type=Float64
         )
         cgcp_moi = backend(cgcp)
