@@ -114,7 +114,7 @@ function main()
         timer=to
     )
 
-    display(to)
+    print_timer(to)
     println()
 
     return nothing

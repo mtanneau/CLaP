@@ -3,7 +3,8 @@ using SparseArrays
 
 import CPLEX
 
-include(joinpath(@__DIR__, "../../src/standard_form.jl"))
+include(joinpath(@__DIR__, "../../src/CLaP.jl"))
+using .CLaP
 
 const CUT_PARAMS = [
     "CPXPARAM_MIP_Cuts_BQP",

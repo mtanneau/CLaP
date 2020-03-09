@@ -6,6 +6,8 @@ using ArgParse
 using DelimitedFiles
 using TimerOutputs
 
+using JuMP
+
 # Solvers
 import CPLEX
 import Gurobi
@@ -33,10 +35,13 @@ const CPLEX_CUT_PARAMS = [
 ]
 
 # Code
-include(joinpath(@__DIR__, "../../src/standard_form.jl"))
-include(joinpath(@__DIR__, "../../src/prepross.jl"))
-include(joinpath(@__DIR__, "../../src/strengthening.jl"))
-include(joinpath(@__DIR__, "../../src/cgcp.jl"))
+include(joinpath(@__DIR__, "../../src/CLaP.jl"))
+using .CLaP
+
+# include(joinpath(@__DIR__, "../../src/standard_form.jl"))
+# include(joinpath(@__DIR__, "../../src/prepross.jl"))
+# include(joinpath(@__DIR__, "../../src/strengthening.jl"))
+# include(joinpath(@__DIR__, "../../src/cgcp.jl"))
 
 import Base.RefValue
 
