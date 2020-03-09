@@ -42,7 +42,7 @@ import Base.RefValue
 
 function landp_callback(
     cbdata, micp, x_micp, sf::StandardProblem, cgcp_optimizer,
-    ncalls::RefValue{Int}, ncuts_tot::RefValue{Int}, ncgcp_nocut::RefValue{Int},
+    ncalls::RefValue{Int}, ncuts_tot::RefValue{Int}, ncgcp_solve::RefValue{Int},
     max_rounds, nrm,
     timer, tstart, time_limit
 )
@@ -95,6 +95,7 @@ function landp_callback(
             bridge_type=Float64
         )
         cgcp_moi = backend(cgcp)
+        ncgcp_solve[] += 1
 
         # Solve CGCP
         @timeit timer "CGCP-solve" MOI.optimize!(cgcp_moi)
@@ -111,7 +112,6 @@ function landp_callback(
 
         if δ >= -1e-4
             # Cut is not violated
-            ncgcp_nocut[] += 1
             continue
         end
 
@@ -121,6 +121,10 @@ function landp_callback(
         v0 = value(cgcp[:v0])
         λ = value.(cgcp[:λ])
         μ = value.(cgcp[:μ])
+
+        # Check that u0, v0 are ⩾ 0
+        # If not, we reject the cut
+        u0 >= 0.0 && v0 >= 0.0 || continue
 
         # @info "Norm of multipliers" u0 + v0 norm(v, 2) norm(λ, 2) norm(μ, 2) dot(λ, x_)
 
@@ -248,7 +252,7 @@ function landp_callback(
 
         # TODO: check that cut does not cut optimal solution
         z = (dot(α, x_micp) - β) / r
-        z >= -1e-6 || (@error("Optimal solution is cut by $z", norm(x_, 2), norm(α, 2), β, u0, v0, j, x_[j], f[j]); ncgcp_nocut[] += 1; continue)
+        z >= -1e-6 || (@error("Optimal solution is cut by $z", norm(x_, 2), norm(α, 2), β, u0, v0, j, x_[j], f[j]); continue)
 
         # Submit the cut
         @timeit timer "Submit" MOI.submit(
@@ -295,14 +299,14 @@ function landp(
     # Book-keeping
     ncalls = Ref(0)
     ncuts_tot = Ref(0)
-    ncgcp_nocut = Ref(0)
+    ncgcp_solve = Ref(0)
 
     # Set callback
     tstart = time()
     MOI.set(micp, MOI.UserCutCallback(),
         cbdata -> landp_callback(
             cbdata, micp, x_micp, sf, cgcp_optimizer,
-            ncalls, ncuts_tot, ncgcp_nocut,
+            ncalls, ncuts_tot, ncgcp_solve,
             max_rounds, nrm, timer, tstart, time_limit
         )
     )
@@ -311,7 +315,7 @@ function landp(
     @timeit timer "MICP" MOI.optimize!(micp)
 
     # Result log
-    @info "User callback was called $(ncalls[]) times" ncuts_tot[] ncgcp_nocut[]
+    @info "User callback was called $(ncalls[]) times" ncuts_tot[] ncgcp_solve[]
 
     @info MOI.get(micp, MOI.TerminationStatus())
     @info MOI.get(micp, MOI.ObjectiveBound())
