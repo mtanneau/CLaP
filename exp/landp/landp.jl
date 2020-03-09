@@ -44,16 +44,21 @@ function landp_callback(
     cbdata, micp, x_micp, sf::StandardProblem, cgcp_optimizer,
     ncalls::RefValue{Int}, ncuts_tot::RefValue{Int}, ncgcp_nocut::RefValue{Int},
     max_rounds, nrm,
-    timer
+    timer, tstart, time_limit
 )
-
-    ncalls[] += 1
-    ncalls[] <= max_rounds || return nothing
 
     m, n = size(sf.A)
 
     x = sf.var_indices
     x_ = MOI.get(micp, MOI.CallbackVariablePrimal(cbdata), x)
+
+    # Compute objective value and log
+    tnow = time()
+    @info "Objective value after $(ncalls[]) rounds and $(tnow - tstart) seconds: $(dot(sf.c, x_))"
+
+    # Update number of rounds
+    ncalls[] += 1
+    ncalls[] <= max_rounds || return nothing
 
     # Clean x_
     @timeit timer "Cleaning" for j in 1:n
@@ -68,6 +73,10 @@ function landp_callback(
     p = sortperm(f, rev=true)
 
     @timeit timer "Cut-generation" for j in p
+
+        # Time limit
+        time() - tstart <= time_limit || break
+
         # Skip non-fractional variables
         f[j] >= 1e-4 || continue
         
@@ -214,7 +223,7 @@ function landp_callback(
             Atv = sf.A'v
             for (kidx, k) in sf.cones
 
-                isa(k, NONLINEAR_CONE) && sum(sf.vartypes_implied[kidx] .*  iszero.(x_[kidx])) >= 1 && @info "Could have strengthened a cone"
+                isa(k, NONLINEAR_CONE) && all(sf.vartypes_implied[kidx] .*  iszero.(x_[kidx])) >= 1 && @info "Could have strengthened a cone"
                 
                 isa(k, Union{MOI.Nonpositives, MOI.Nonnegatives}) || continue
                 j_ = kidx[1]
@@ -289,11 +298,12 @@ function landp(
     ncgcp_nocut = Ref(0)
 
     # Set callback
+    tstart = time()
     MOI.set(micp, MOI.UserCutCallback(),
         cbdata -> landp_callback(
             cbdata, micp, x_micp, sf, cgcp_optimizer,
             ncalls, ncuts_tot, ncgcp_nocut,
-            max_rounds, nrm, timer
+            max_rounds, nrm, timer, tstart, time_limit
         )
     )
 
@@ -303,6 +313,6 @@ function landp(
     # Result log
     @info "User callback was called $(ncalls[]) times" ncuts_tot[] ncgcp_nocut[]
 
-    verbose && @show MOI.get(micp, MOI.TerminationStatus())
-    verbose && @show MOI.get(micp, MOI.ObjectiveBound())
+    @info MOI.get(micp, MOI.TerminationStatus())
+    @info MOI.get(micp, MOI.ObjectiveBound())
 end
