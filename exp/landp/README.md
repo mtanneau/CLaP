@@ -8,15 +8,12 @@ Shell command to run from this directory
 ### Log files
 
 The log files are located in the `log/` folder.
-Each log file should be named as follows:
+The naming convention is
 ```
 <finst>_<MICPSolver>_<CGCPSolver>_<Normalization>_<Rounds>.cpx
-```
-for the CPLEX output, and
-```
 <finst>_<MICPSolver>_<CGCPSolver>_<Normalization>_<Rounds>.log
 ```
-for the log file, where
+for the CPLEX output and logging output, respectively, where
 * `<finst>` is the instance name
 * `<MICPSolver>` and `<CGCPSolver>` are the MICP and CGCP solvers' names, respectively
 * `<Normalization>` is the normalization
@@ -37,9 +34,8 @@ julia --project=@. run_landp.jl  --MICPSolver CPLEX --CGCPSolver Gurobi --TimeLi
 ### Multiple instances (with GNU `parallel`)
 
 ```bash
-cat ../../dat/instances_misocp.txt | grep "flay" | parallel -j1 "julia --project=@. run_landp.jl --CGCPSolver CPLEX --Rounds 10 --Normalization Conic ../../dat/cblib/{}.cbf > log/{}_CPX_CPX_SCN_10.cpx 2> log/{}_CPX_CPX_SCN_10.log
+cat ../../dat/instances_misocp.txt | grep "flay" | parallel -j1 "julia --project=@. run_landp.jl --MICPSolver CPLEX --CGCPSolver Gurobi --Rounds 200 --Normalization Conic --TimeLimit 7200.0 ../../dat/cblib/{}.cbf > log/{}_CPX_GRB_SCN_200.cpx 2>log/{}_CPX_GRB_SCN_200.log"
 ```
-will run all `flay` instances using 1 thread.
 
 ## Settings
 
@@ -55,3 +51,24 @@ will run all `flay` instances using 1 thread.
 * `Rounds`: Maximum rounds of cutting planes.
     Once the callback is called that many times, it is de-activated.
 * `TimeLimit`: Time limit, in seconds.
+
+To view more information, just run
+```bash
+julia run_landp.jl --help
+```
+
+## Building a Julia sysimage
+
+```bash
+$ julia --project=@. --trace-compile=precomp.jl snoop.jl
+```
+then
+```julia
+using PackageCompiler
+PackageCompiler.create_sysimage([:JuMP, :MathOptInterface, :LinearAlgebra, :ArgParse, :TimerOutputs, :Gurobi, :CPLEX, :Logging]; project="../..", sysimage_path="JuliaLandP.so", precompile_statements_file="precomp.jl")
+```
+
+To use the system image, simply add the `-JJuliaLandP.so` option when calling Julia, for instance:
+```
+julia -JJuliaLandP.so --project=@. run_landp.jl --CGCPSolver Gurobi --TimeLimit 120.0 --Rounds 10 ../../examples/dat/misocp2.cbf
+```
