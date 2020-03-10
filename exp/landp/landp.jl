@@ -38,32 +38,22 @@ const CPLEX_CUT_PARAMS = [
 include(joinpath(@__DIR__, "../../src/CLaP.jl"))
 using .CLaP
 
-# include(joinpath(@__DIR__, "../../src/standard_form.jl"))
-# include(joinpath(@__DIR__, "../../src/prepross.jl"))
-# include(joinpath(@__DIR__, "../../src/strengthening.jl"))
-# include(joinpath(@__DIR__, "../../src/cgcp.jl"))
-
 import Base.RefValue
 
 function landp_callback(
     cbdata, micp, x_micp, sf::StandardProblem, cgcp_optimizer,
-    ncalls::RefValue{Int}, ncuts_tot::RefValue{Int}, ncgcp_solve::RefValue{Int},
+    ncalls::RefValue{Int}, ncuts_tot::RefValue{Int}, ncgcp_solve::RefValue{Int}, nbaritertot::RefValue{Int},
     max_rounds, nrm,
     timer, tstart, time_limit
 )
+    ncalls[] > max_rounds && return nothing
+    tnow = time()
 
     m, n = size(sf.A)
 
     x = sf.var_indices
     x_ = MOI.get(micp, MOI.CallbackVariablePrimal(cbdata), x)
-
-    # Compute objective value and log
-    tnow = time()
-    @info "Objective value after $(ncalls[]) rounds and $(tnow - tstart) seconds: $(dot(sf.c, x_))"
-
-    # Update number of rounds
-    ncalls[] += 1
-    ncalls[] <= max_rounds || return nothing
+    z_ = dot(x_, sf.c)  # current lower bound
 
     # Clean x_
     @timeit timer "Cleaning" for j in 1:n
@@ -76,6 +66,18 @@ function landp_callback(
     f = min.(ceil.(x_) .- x_, x_ .- floor.(x_))
     f .*= sf.vartypes
     p = sortperm(f, rev=true)
+
+    # tracked metrics
+    nsolve = 0
+    ncuts = 0
+    nbariter = 0
+    # TODO: cut sparsity
+    # TODO: min/max ratio
+    # TODO: support of x_
+    # TODO: number of active cones
+    # TODO: strengthening
+    # 
+
 
     @timeit timer "Cut-generation" for j in p
 
@@ -100,13 +102,17 @@ function landp_callback(
             bridge_type=Float64
         )
         cgcp_moi = backend(cgcp)
-        ncgcp_solve[] += 1
+        nsolve += 1
 
         # Solve CGCP
         @timeit timer "CGCP-solve" MOI.optimize!(cgcp_moi)
 
         # Check termination status
         st = MOI.get(cgcp_moi, MOI.TerminationStatus())
+
+        # Get number of barrier iterations
+        nbariter += MOI.get(cgcp_moi, MOI.BarrierIterations())
+
         if st != MOI.OPTIMAL
             @warn "CGCP exited with status" st
             continue
@@ -127,12 +133,16 @@ function landp_callback(
         λ = value.(cgcp[:λ])
         μ = value.(cgcp[:μ])
 
-        # Check that u0, v0 are ⩾ 0
-        # If not, we reject the cut
-        u0 >= 0.0 && v0 >= 0.0 || continue
+        # Check that u0, v0 are not "too negative", otherwise reject the cut
+        (u0 >= -1e-5 && v0 >= -1e-5) || continue
+
+        # Clean u0, v0
+        u0 = max(0.0, u0)
+        v0 = max(0.0, v0)
+        (abs(u0) <= 1e-6) && (u0 = 0.0)
+        (abs(v0) <= 1e-6) && (v0 = 0.0)
 
         # @info "Norm of multipliers" u0 + v0 norm(v, 2) norm(λ, 2) norm(μ, 2) dot(λ, x_)
-
         a1 = -u0 .* pi
         a2 = sf.A'v .+ v0 .* pi
 
@@ -254,6 +264,7 @@ function landp_callback(
         r = norm(α, 2)
 
         # TODO: book-keeping
+        α_ = sparse(α)
 
         # TODO: check that cut does not cut optimal solution
         z = (dot(α, x_micp) - β) / r
@@ -267,9 +278,27 @@ function landp_callback(
             MOI.GreaterThan(β / r)
         )
 
-        ncuts_tot[] += 1  # book-keeping
+        ncuts += 1  # book-keeping
 
     end  # cut-generation loop
+
+    # Log
+    tround = time() - tnow
+    ttot = time() - tstart
+    @info("Stats for round $(ncalls[])",
+        z_,
+        nsolve,
+        ncuts,
+        nbariter,
+        tround,
+        ttot
+    )
+
+    # Book-keeping
+    ncgcp_solve[] += nsolve
+    ncuts_tot[] += ncuts
+    nbaritertot[] += nbariter
+    ncalls[] += 1
     return nothing
 end  # callback function
 
@@ -305,13 +334,14 @@ function landp(
     ncalls = Ref(0)
     ncuts_tot = Ref(0)
     ncgcp_solve = Ref(0)
+    nbaritertot = Ref(0)
 
     # Set callback
     tstart = time()
     MOI.set(micp, MOI.UserCutCallback(),
         cbdata -> landp_callback(
             cbdata, micp, x_micp, sf, cgcp_optimizer,
-            ncalls, ncuts_tot, ncgcp_solve,
+            ncalls, ncuts_tot, ncgcp_solve, nbaritertot,
             max_rounds, nrm, timer, tstart, time_limit
         )
     )
@@ -320,8 +350,128 @@ function landp(
     @timeit timer "MICP" MOI.optimize!(micp)
 
     # Result log
-    @info "User callback was called $(ncalls[]) times" ncuts_tot[] ncgcp_solve[]
+    @info "User callback was called $(ncalls[]) times" ncuts_tot[] ncgcp_solve[] nbaritertot[] (nbaritertot[] / ncgcp_solve[])
 
     @info MOI.get(micp, MOI.TerminationStatus())
-    @info MOI.get(micp, MOI.ObjectiveBound())
+    @info "Final bound: $(MOI.get(micp, MOI.ObjectiveBound()))"
+end
+
+function parse_commandline(cl_args)
+    s = ArgParseSettings()
+
+    @add_arg_table! s begin
+        "--MICPSolver"
+            help = "MICP solver"
+            arg_type = Symbol
+            default = :CPLEX
+        "--CGCPSolver"
+            help = "CGCP solver"
+            arg_type = Symbol
+            default = :CPLEX
+        "--Normalization"
+            help = "Normalization condition"
+            arg_type = Symbol
+            default = :Conic
+        "--Rounds"
+            help = "Maximum number of cutting plane rounds"
+            arg_type = Int
+            default = typemax(Int)
+        "--TimeLimit"
+            help = "Time limit (in seconds)"
+            arg_type = Float64
+            default = 1e30
+        "finst"
+            help = "Instance file (in CBF format)"
+            required = true
+    end
+
+    return parse_args(cl_args, s)
+end
+
+function main(CLARGS)
+    cl_args = parse_commandline(CLARGS)
+    @info("User options", cl_args)
+
+    # Set solvers
+    if cl_args["MICPSolver"] == :CPLEX
+        micp_optimizer = MOI.OptimizerWithAttributes(
+            CPLEX.Optimizer,
+            "CPX_PARAM_PREIND" => 0,
+            "CPX_PARAM_THREADS" => 1,
+            # disable all cuts
+            [cutparam => -1 for cutparam in CPLEX_CUT_PARAMS]...,
+            "CPXPARAM_MIP_Limits_CutsFactor" => 1e30,
+            "CPXPARAM_MIP_Strategy_HeuristicFreq" => -1,
+            "CPXPARAM_MIP_Limits_Nodes" => 0,
+            "CPXPARAM_MIP_Strategy_MIQCPStrat" => 2  # OA algorithm
+        )
+    elseif cl_args["MICPSolver"] == :Gurobi
+        GRB_ENV = Gurobi.Env()  # To avoid checking out multiple Gurobi licenses
+        micp_optimizer = MOI.OptimizerWithAttributes(
+            () -> Gurobi.Optimizer(GRB_ENV),
+            "Threads" => 1,
+            "Presolve" => 0,
+            "Heuristics" => 0,
+            "Cuts" => 0,
+            "MIQCPMethod" => 1,
+            "NodeLimit" => 1,
+            "QCPDual" => 0
+        )
+    else
+        error("MICP solver $(cl_args["MICPSolver"]) is not supported.\n Possible values are `CPLEX` and `Gurobi`.")
+    end
+
+    if cl_args["CGCPSolver"] == :CPLEX
+        cgcp_optimizer = MOI.OptimizerWithAttributes(
+            CPLEX.Optimizer,
+            "CPX_PARAM_THREADS" => 1,
+            "CPX_PARAM_PREIND" => 0,
+            "CPX_PARAM_SCRIND" => 0
+        )
+
+    elseif cl_args["CGCPSolver"] == :Gurobi
+        GRB_ENV = Gurobi.Env()  # To avoid checking out multiple Gurobi licenses
+        cgcp_optimizer = MOI.OptimizerWithAttributes(
+            () -> Gurobi.Optimizer(GRB_ENV),
+            "Threads" => 1,
+            "OutputFlag" => 0,
+            "Presolve" => 0,
+            "QCPDual" => 0
+        )
+
+    elseif cl_args["CGCPSolver"] == :Mosek
+        cgcp_optimizer = MOI.OptimizerWithAttributes(
+            Mosek.Optimizer,
+            "NUM_THREADS" => 1,
+            "LOG" => 0
+        )
+    else
+        error("CGCP solver $(cl_args["CGCPSolver"]) is not supported.\n Possible values are `CPLEX`, `Gurobi` and `Mosek`.")
+    end
+
+    # Warm-up run
+    to = TimerOutput()
+    @info "Warming up..."
+    with_logger(Logging.NullLogger()) do  # this will de-activate logs
+        landp(
+            cl_args["finst"],
+            micp_optimizer, cgcp_optimizer,
+            30.0, cl_args["Normalization"], cl_args["Rounds"],
+            verbose=false, timer = to
+        )
+    end
+
+    # Real run
+    to = TimerOutput()
+    landp(
+        cl_args["finst"],
+        micp_optimizer, cgcp_optimizer,
+        cl_args["TimeLimit"], cl_args["Normalization"], cl_args["Rounds"],
+        timer=to
+    )
+
+    print_timer(to)
+    println()
+
+    return nothing
 end
