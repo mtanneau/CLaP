@@ -70,7 +70,9 @@ function landp_callback(
     # tracked metrics
     nsolve = 0
     ncuts = 0
+    nkcuts = 0
     nbariter = 0
+    nzcoeffs = 0
     # TODO: cut sparsity
     # TODO: min/max ratio
     # TODO: support of x_
@@ -136,6 +138,12 @@ function landp_callback(
         # Check that u0, v0 are not "too negative", otherwise reject the cut
         (u0 >= -1e-5 && v0 >= -1e-5) || continue
 
+        (abs(v0) >= 1e-5 && abs(u0) >= 1e-5) || @warn("Round $(ncalls[]): K* cut", u0, v0, δ)
+        (abs(v0) >= 1e-5 && abs(u0) >= 1e-5) && @warn("Round $(ncalls[]): Sp cut", u0, v0, δ)
+        # TODO: if u0 or v0 is zero, the cut is a K* cut
+        # In that case, dis-aggregate the cut, submit it and stop the cut-generation loop,
+        # since subsequent solves are likely to generate the same K* cut
+
         # Clean u0, v0
         u0 = max(0.0, u0)
         v0 = max(0.0, v0)
@@ -193,6 +201,37 @@ function landp_callback(
             else
                 @warn "Cone $(typeof(k)) not recognized in feasibility check"
             end
+        end
+
+        # K* cut
+        if iszero(u0) || iszero(v0)
+            # Dis-aggregate the cut
+            for (kidx, k) in sf.cones
+                
+                isa(k, NONLINEAR_CONE) || continue  # Skip linear constraints
+
+                if iszero(u0)
+                    λ_ = λ[kidx]
+                else 
+                    λ_ = μ[kidx]
+                end
+
+                # Skip zero components
+                norm(λ_) >= 1e-5 || continue
+
+                # Add K* cut
+                @timeit timer "Submit" MOI.submit(
+                    micp,
+                    MOI.UserCut(cbdata),
+                    MOI.ScalarAffineFunction(MOI.ScalarAffineTerm.(λ_, x[kidx]), 0.0),
+                    MOI.GreaterThan(0.0)
+                )
+
+                nkcuts += 1
+            end
+
+            # Stop the cut generation here
+            continue
         end
 
         β = min(-u0 * pi0, dot(sf.b, v) + v0 * (pi0 + 1))
@@ -265,6 +304,7 @@ function landp_callback(
 
         # TODO: book-keeping
         α_ = sparse(α)
+        nzcoeffs += nnz(α_)
 
         # TODO: check that cut does not cut optimal solution
         z = (dot(α, x_micp) - β) / r
@@ -285,11 +325,14 @@ function landp_callback(
     # Log
     tround = time() - tnow
     ttot = time() - tstart
+    sparsity = nzcoeffs / ncuts
     @info("Stats for round $(ncalls[])",
         z_,
         nsolve,
         ncuts,
+        nkcuts,
         nbariter,
+        sparsity,
         tround,
         ttot
     )
@@ -474,4 +517,9 @@ function main(CLARGS)
     println()
 
     return nothing
+end
+
+# Run the main method if script is called directly
+if abspath(PROGRAM_FILE) == @__FILE__
+    main(ARGS)
 end

@@ -60,12 +60,12 @@ julia run_landp.jl --help
 ## Building a Julia sysimage
 
 ```bash
-$ julia --project=@. --trace-compile=precomp.jl snoop.jl
+julia --project=@. --trace-compile=precompile.jl snoop.jl
 ```
 then
 ```julia
 using PackageCompiler
-PackageCompiler.create_sysimage([:JuMP, :MathOptInterface, :LinearAlgebra, :ArgParse, :TimerOutputs, :Gurobi, :CPLEX, :Logging]; project="../..", sysimage_path="JuliaLandP.so", precompile_statements_file="precomp.jl")
+PackageCompiler.create_sysimage([:JuMP, :MathOptInterface, :LinearAlgebra, :ArgParse, :TimerOutputs, :Gurobi, :CPLEX, :Logging, :Mosek, :MosekTools]; project="../..", sysimage_path="JuliaLandP.so", precompile_statements_file="precompile.jl")
 ```
 
 To use the system image, simply add the `-JJuliaLandP.so` option when calling Julia, for instance:
