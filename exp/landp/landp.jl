@@ -42,9 +42,13 @@ import Base.RefValue
 
 function landp_callback(
     cbdata, micp, x_micp, sf::StandardProblem, cgcp_optimizer,
-    ncalls::RefValue{Int}, ncuts_tot::RefValue{Int}, ncgcp_solve::RefValue{Int}, nbaritertot::RefValue{Int},
     max_rounds, nrm,
-    timer, tstart, time_limit
+    timer, tstart, time_limit;
+    ncalls::RefValue{Int}=Ref(0),
+    ncuts_tot::RefValue{Int}=Ref(0),
+    nkcuts_tot::RefValue{Int}=Ref(0),
+    ncgcp_solve::RefValue{Int}=Ref(0),
+    nbaritertot::RefValue{Int}=Ref(0),
 )
     ncalls[] > max_rounds && return nothing
     tnow = time()
@@ -138,19 +142,12 @@ function landp_callback(
         # Check that u0, v0 are not "too negative", otherwise reject the cut
         (u0 >= -1e-5 && v0 >= -1e-5) || continue
 
-        (abs(v0) >= 1e-5 && abs(u0) >= 1e-5) || @warn("Round $(ncalls[]): K* cut", u0, v0, δ)
-        (abs(v0) >= 1e-5 && abs(u0) >= 1e-5) && @warn("Round $(ncalls[]): Sp cut", u0, v0, δ)
-        # TODO: if u0 or v0 is zero, the cut is a K* cut
-        # In that case, dis-aggregate the cut, submit it and stop the cut-generation loop,
-        # since subsequent solves are likely to generate the same K* cut
-
         # Clean u0, v0
         u0 = max(0.0, u0)
         v0 = max(0.0, v0)
         (abs(u0) <= 1e-6) && (u0 = 0.0)
         (abs(v0) <= 1e-6) && (v0 = 0.0)
 
-        # @info "Norm of multipliers" u0 + v0 norm(v, 2) norm(λ, 2) norm(μ, 2) dot(λ, x_)
         a1 = -u0 .* pi
         a2 = sf.A'v .+ v0 .* pi
 
@@ -204,7 +201,10 @@ function landp_callback(
         end
 
         # K* cut
-        if iszero(u0) || iszero(v0)
+        β = min(-u0 * pi0, dot(sf.b, v) + v0 * (pi0 + 1))
+        if (iszero(u0) || iszero(v0)) && β <= 1e-6
+            @warn "Round $(ncalls[]): K* cut" j u0 v0 δ
+
             # Dis-aggregate the cut
             for (kidx, k) in sf.cones
                 
@@ -226,15 +226,14 @@ function landp_callback(
                     MOI.ScalarAffineFunction(MOI.ScalarAffineTerm.(λ_, x[kidx]), 0.0),
                     MOI.GreaterThan(0.0)
                 )
-
-                nkcuts += 1
             end
 
+            nkcuts += 1
+
             # Stop the cut generation here
-            continue
+            break
         end
 
-        β = min(-u0 * pi0, dot(sf.b, v) + v0 * (pi0 + 1))
         α = λ .- (u0 .* pi)
         σ = α - a2
 
@@ -340,6 +339,7 @@ function landp_callback(
     # Book-keeping
     ncgcp_solve[] += nsolve
     ncuts_tot[] += ncuts
+    nkcuts_tot[] += nkcuts
     nbaritertot[] += nbariter
     ncalls[] += 1
     return nothing
@@ -376,6 +376,7 @@ function landp(
     # Book-keeping
     ncalls = Ref(0)
     ncuts_tot = Ref(0)
+    nkcuts_tot = Ref(0)
     ncgcp_solve = Ref(0)
     nbaritertot = Ref(0)
 
@@ -384,8 +385,11 @@ function landp(
     MOI.set(micp, MOI.UserCutCallback(),
         cbdata -> landp_callback(
             cbdata, micp, x_micp, sf, cgcp_optimizer,
-            ncalls, ncuts_tot, ncgcp_solve, nbaritertot,
-            max_rounds, nrm, timer, tstart, time_limit
+            max_rounds, nrm, timer, tstart, time_limit;
+            ncalls=ncalls,
+            ncuts_tot=ncuts_tot, nkcuts_tot=nkcuts_tot,
+            ncgcp_solve=ncgcp_solve,
+            nbaritertot=nbaritertot
         )
     )
 
@@ -393,7 +397,7 @@ function landp(
     @timeit timer "MICP" MOI.optimize!(micp)
 
     # Result log
-    @info "User callback was called $(ncalls[]) times" ncuts_tot[] ncgcp_solve[] nbaritertot[] (nbaritertot[] / ncgcp_solve[])
+    @info "User callback was called $(ncalls[]) times" ncuts_tot[] nkcuts_tot[] ncgcp_solve[] nbaritertot[] (nbaritertot[] / ncgcp_solve[])
 
     @info MOI.get(micp, MOI.TerminationStatus())
     @info "Final bound: $(MOI.get(micp, MOI.ObjectiveBound()))"
