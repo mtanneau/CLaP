@@ -20,6 +20,24 @@ main([
     joinpath(@__DIR__, "../../dat/cblib/sssd-strong-15-8.cbf")
 ])
 
+main([
+    "--MICPSolver", "CPLEX",
+    "--CGCPSolver", "Mosek",
+    "--Rounds", "200",
+    "--TimeLimit", "120.0",
+    "--Normalization", "PureConic",
+    joinpath(@__DIR__, "../../dat/cblib/sssd-strong-15-8.cbf")
+])
+
+main([
+    "--MICPSolver", "CPLEX",
+    "--CGCPSolver", "Mosek",
+    "--Rounds", "200",
+    "--TimeLimit", "120.0",
+    "--Normalization", "Conic",
+    joinpath(@__DIR__, "../../dat/cblib/sssd-strong-15-8.cbf")
+])
+
 micp_optimizer = MOI.OptimizerWithAttributes(
     CPLEX.Optimizer,
     "CPX_PARAM_PREIND" => 0,
