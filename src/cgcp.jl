@@ -67,14 +67,8 @@ function build_cgcp(
 
     @variable(cgcp, v[1:m])
 
-    if nrm == :PureConic
-        # For the pure conic normalization, u0 and v0 are free
-        @variable(cgcp, u0)
-        @variable(cgcp, v0)
-    else
-        @variable(cgcp, u0 >= 0)
-        @variable(cgcp, v0 >= 0)
-    end
+    @variable(cgcp, u0 >= 0)
+    @variable(cgcp, v0 >= 0)
 
     # Conic Farkas multipliers
     λ = Vector{JuMP.VariableRef}(undef, n)
@@ -131,21 +125,14 @@ function build_cgcp(
 
     # Objective and constraints
     if compact
-        if nrm == :PureConic
-            @constraint(cgcp, A'v .+ ( μ .- λ) .+ (u0 + v0) .* π       .== 0.0)
-            @constraint(cgcp, b'v               + (u0 + v0)  * π0 + v0  == 0.0)
-
-            @objective(cgcp, Min, dot(x_, λ) - u0 * (dot(x_, π) - π0))
         
-        else
-            @variable(cgcp, η1 >= 0)
-            @variable(cgcp, η2 >= 0)
+        @variable(cgcp, η1 >= 0)
+        @variable(cgcp, η2 >= 0)
 
-            @constraint(cgcp, A'v .+ ( μ .- λ) .+ (u0 + v0) .* π       .== 0.0)
-            @constraint(cgcp, b'v  - (η2 - η1)  + (u0 + v0)  * π0 + v0  == 0.0)
+        @constraint(cgcp, A'v .+ ( μ .- λ) .+ (u0 + v0) .* π       .== 0.0)
+        @constraint(cgcp, b'v  - (η2 - η1)  + (u0 + v0)  * π0 + v0  == 0.0)
 
-            @objective(cgcp, Min, dot(x_, λ) - u0 * (dot(x_, π) - π0) + η1)
-        end
+        @objective(cgcp, Min, dot(x_, λ) - u0 * (dot(x_, π) - π0) + η1)
         
     else
         nrm != :PureConic || error("Cannot used pure conic normalization with full CGCP.")
@@ -167,6 +154,11 @@ function build_cgcp(
     elseif nrm == :Conic || nrm == :PureConic
         #      Conic normalization: ρ'λ + ρ'μ + u0 + v0 ⩽ 1
         # Pure conic normalization: ρ'λ + ρ'μ ⩽ 1            (do not normalize u0, v0)
+
+        # if nrm == :PureConic
+        #     @constraint(cgcp, normalization0, u0 + v0 == 1)
+        # end
+
         @constraint(cgcp, normalization, 0 <= 1)
 
         if nrm == :Conic
