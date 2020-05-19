@@ -4,7 +4,8 @@ using SparseArrays
 
 import CPLEX
 
-include(joinpath(@__DIR__, "../../src/standard_form.jl"))
+include(joinpath(@__DIR__, "../../src/CLaP.jl"))
+using .CLaP
 
 # Read model from file
 cbf = MOI.FileFormats.CBF.Model()

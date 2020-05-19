@@ -64,7 +64,9 @@ function build_cgcp(
         @variable(cgcp, α[1:n])
         @variable(cgcp, β)
     end
+
     @variable(cgcp, v[1:m])
+
     @variable(cgcp, u0 >= 0)
     @variable(cgcp, v0 >= 0)
 
@@ -123,16 +125,17 @@ function build_cgcp(
 
     # Objective and constraints
     if compact
+        
         @variable(cgcp, η1 >= 0)
         @variable(cgcp, η2 >= 0)
 
-        # Compact form
         @constraint(cgcp, A'v .+ ( μ .- λ) .+ (u0 + v0) .* π       .== 0.0)
         @constraint(cgcp, b'v  - (η2 - η1)  + (u0 + v0)  * π0 + v0  == 0.0)
 
         @objective(cgcp, Min, dot(x_, λ) - u0 * (dot(x_, π) - π0) + η1)
-    
+        
     else
+        nrm != :PureConic || error("Cannot used pure conic normalization with full CGCP.")
         # Full form
         @constraint(cgcp, f1a, α .==        λ .- (u0 .*  π))
         @constraint(cgcp, f1b, α .== A'v .+ μ .+ (v0 .*  π))
@@ -148,10 +151,20 @@ function build_cgcp(
         # |α| ⩽ 1
         @constraint(cgcp, normalization, sum(α .^ 2) <= 1)
 
-    elseif nrm == :Conic
-        # Conic normalization
-        # ρ'λ + ρ'μ + u0 + v0 ⩽ 1
-        @constraint(cgcp, normalization, u0 + v0 <= 1)
+    elseif nrm == :Conic || nrm == :PureConic
+        #      Conic normalization: ρ'λ + ρ'μ + u0 + v0 ⩽ 1
+        # Pure conic normalization: ρ'λ + ρ'μ ⩽ 1            (do not normalize u0, v0)
+
+        # if nrm == :PureConic
+        #     @constraint(cgcp, normalization0, u0 + v0 == 1)
+        # end
+
+        @constraint(cgcp, normalization, 0 <= 1)
+
+        if nrm == :Conic
+            set_normalized_coefficient(normalization, u0, 1.0)
+            set_normalized_coefficient(normalization, v0, 1.0)
+        end
         
         for (kidx, k) in cones
             kd = MOI.dual_set(k)
@@ -193,7 +206,7 @@ function build_cgcp(
                 error("Conic normalization for dual cone $(typeof(kd)) is not supported")
             end
         end
-
+    
     else
         error("Normalization $nrm is not supported.")
     end

@@ -13,10 +13,10 @@ The strengthened coefficient is given by
 where ``π = -a / (u0 + v0)``
 """
 function strengthen(a::Float64, u0::Float64, v0::Float64, k::MOI.Nonnegatives)
-    
+
     # Sanity checks
-    @assert MOI.dimension(k) == 1 "Trying to strengthen a $(typeof(k)) of dimension $(MOI.dimension(k)) (should be 1)"
-    @assert u0 + v0 > 1e-4  "u0 + v0 = $(u0 + v0) (should be > 0)"  # Otherwise cut is essentially a K* cut
+    MOI.dimension(k) == 1 || error("Trying to strengthen a $(typeof(k)) of dimension $(MOI.dimension(k)) (should be 1)")
+    @assert u0 + v0 > 1e-4  "u0 + v0 = $(u0 + v0) (should be > 1e-4)"  # Otherwise cut is essentially a K* cut
 
     π = -a / (u0 + v0)
     return min(
@@ -39,7 +39,7 @@ where ``π = -a / (u0 + v0)``
 function strengthen(a::Float64, u0::Float64, v0::Float64, k::MOI.Nonpositives)
     
     # Sanity checks
-    @assert MOI.dimension(k) == 1 "Trying to strengthen a $(typeof(k)) of dimension $(MOI.dimension(k)) (should be 1)"
+    MOI.dimension(k) == 1 || error("Trying to strengthen a $(typeof(k)) of dimension $(MOI.dimension(k)) (should be 1)")
     @assert u0 + v0 > 1e-4  # Otherwise cut is essentially a K* cut
     
     π = -a / (u0 + v0)

@@ -105,11 +105,3 @@ uflquad-nopsc-30-100
 uflquad-nopsc-30-150
 uflquad-nopsc-30-200
 uflquad-nopsc-30-300
-uflquad-psc-10-100
-uflquad-psc-10-150
-uflquad-psc-20-100
-uflquad-psc-20-150
-uflquad-psc-30-100
-uflquad-psc-30-150
-uflquad-psc-30-200
-uflquad-psc-30-300
