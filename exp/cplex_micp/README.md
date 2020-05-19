@@ -20,5 +20,5 @@ julia --project=@. run_cplex_micp.jl <instance_name>.cbf
 ## Solving all instances
 
 ```bash
-cat ../../dat/instances_misocp.txt | parallel -j2 "julia --project=@. run_cplex_micp.jl ../../dat/cblib/{}.cbf > log/{}.cpx 2>&1"
+cat ../instances_misocp.txt | parallel -j2 "julia --project=@. run_cplex_micp.jl ../../dat/cblib/{}.cbf > log/{}.cpx 2>&1"
 ```

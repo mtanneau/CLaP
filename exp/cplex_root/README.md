@@ -30,5 +30,5 @@ where `N` is the (integer) number of cut passes, i.e., `CPXPARAM_MIP_Limits_CutP
 ## Running all instances
 
 ```bash
-cat ../../dat/instances_misocp.txt | parallel -j1 "julia --project=@. run_cplex_root.jl ../../dat/cblib/{}.cbf <N> > log/cpx_rootLaP_<N>_{}.log 2>&1"
+cat ../instances_misocp.txt | parallel -j1 "julia --project=@. run_cplex_root.jl ../../dat/cblib/{}.cbf <N> > log/cpx_rootLaP_<N>_{}.log 2>&1"
 ```

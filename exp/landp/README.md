@@ -34,7 +34,7 @@ julia --project=@. run_landp.jl  --MICPSolver CPLEX --CGCPSolver Gurobi --TimeLi
 ### Multiple instances (with GNU `parallel`)
 
 ```bash
-cat ../../dat/instances_misocp.txt | grep "flay" | parallel -j1 "julia --project=@. run_landp.jl --MICPSolver CPLEX --CGCPSolver Gurobi --Rounds 200 --Normalization Conic --TimeLimit 7200.0 ../../dat/cblib/{}.cbf > log/{}_CPX_GRB_SCN_200.cpx 2>log/{}_CPX_GRB_SCN_200.log"
+cat exp/instances_misocp.txt | grep "flay" | parallel -j NJOBS --joblog exp/landp/jobs.log "julia --project=. --sysimage=exp/landp/JuliaLandP.so landp.jl --MICPSolver CPLEX --CGCPSolver Gurobi --Rounds 200 --Normalization Conic --TimeLimit 1200.0 dat/cblib/{}.cbf > exp/landp/log/{}_CPX_GRB_SCN_200.cpx 2>exp/landp/log/{}_CPX_GRB_SCN_200.log"
 ```
 
 ## Settings
@@ -46,15 +46,15 @@ cat ../../dat/instances_misocp.txt | grep "flay" | parallel -j1 "julia --project
 * `Normalization`: normalization condition in CGCP.
     Possible values are
     * `Alpha2`: α-normalization `|α| ⩽ 1`
-    * `Conic`: conic normalization `|ρ| + |μ| + u0 + v0 ⩽ 1`
-    * `PureConic`: pure conic normalization `|ρ| + |μ| ⩽ 1`
+    * `Conic`: conic normalization `|λ| + |μ| + u0 + v0 ⩽ 1`
+    * `PureConic`: pure conic normalization `|λ| + |μ| ⩽ 1`
 * `Rounds`: Maximum rounds of cutting planes.
     Once the callback is called that many times, it is de-activated.
 * `TimeLimit`: Time limit, in seconds.
 
 To view more information, just run
 ```bash
-julia run_landp.jl --help
+julia landp.jl --help
 ```
 
 ## Building a Julia sysimage
@@ -70,5 +70,5 @@ PackageCompiler.create_sysimage([:JuMP, :MathOptInterface, :LinearAlgebra, :ArgP
 
 To use the system image, simply add the `-JJuliaLandP.so` option when calling Julia, for instance:
 ```
-julia -JJuliaLandP.so --project=@. run_landp.jl --CGCPSolver Gurobi --TimeLimit 120.0 --Rounds 10 ../../examples/dat/misocp2.cbf
+julia -JJuliaLandP.so --project=@. landp.jl --CGCPSolver Gurobi --TimeLimit 120.0 --Rounds 10 ../../examples/dat/misocp2.cbf
 ```
