@@ -1,3 +1,8 @@
+name = "CLaP"
+uuid = "c2c9a6de-9f5b-41c6-a9e5-f6bcc4135c99"
+authors = ["mtanneau <mathieu.tanneau@gmail.com>"]
+version = "0.1.0"
+
 [deps]
 ArgParse = "c7e460c6-2fb9-53a9-8c5b-16f535851c63"
 CPLEX = "a076750e-1247-5638-91d2-ce28b192dca0"

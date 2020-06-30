@@ -23,5 +23,12 @@ docs/site/
 # environment.
 Manifest.toml
 
-# 
+# Julia system image
+JuliaLandP.so
+
+# VS code files
+.vscode/
+
+# Local files
 etc/
+notebooks/
