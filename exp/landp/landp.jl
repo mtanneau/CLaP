@@ -34,319 +34,11 @@ const CPLEX_CUT_PARAMS = [
     "CPXPARAM_MIP_Cuts_ZeroHalfCut"
 ]
 
-# Code
-include(joinpath(@__DIR__, "../../src/CLaP.jl"))
-using .CLaP
+using CLaP
 
 import Base.RefValue
 
-function landp_callback(
-    cbdata, micp, x_micp, sf::StandardProblem, cgcp_optimizer,
-    max_rounds, nrm,
-    timer, tstart, time_limit;
-    ncalls::RefValue{Int}=Ref(0),
-    ncuts_tot::RefValue{Int}=Ref(0),
-    nkcuts_tot::RefValue{Int}=Ref(0),
-    ncgcp_solve::RefValue{Int}=Ref(0),
-    nbaritertot::RefValue{Int}=Ref(0),
-)
-    ncalls[] > max_rounds && return nothing
-    tnow = time()
-
-    m, n = size(sf.A)
-
-    x = sf.var_indices
-    x_ = MOI.get(micp, MOI.CallbackVariablePrimal(cbdata), x)
-    z_ = dot(x_, sf.c)  # current lower bound
-
-    # Clean x_
-    @timeit timer "Cleaning" for j in 1:n
-        if abs(x_[j]) <= 1e-7
-            x_[j] = 0.0
-        end
-    end
-
-    # We try to separate most fractional coordinates first
-    f = min.(ceil.(x_) .- x_, x_ .- floor.(x_))
-    f .*= sf.vartypes
-    p = sortperm(f, rev=true)
-
-    # tracked metrics
-    nsolve = 0
-    ncuts = 0
-    nkcuts = 0
-    nbariter = 0
-    nzcoeffs = 0
-    # TODO: cut sparsity
-    # TODO: min/max ratio
-    # TODO: support of x_
-    # TODO: number of active cones
-    # TODO: strengthening
-    # 
-
-
-    @timeit timer "Cut-generation" for j in p
-
-        # Time limit
-        time() - tstart <= time_limit || break
-
-        # Skip non-fractional variables
-        f[j] >= 1e-4 || continue
-        
-        # Look for a split cut
-        pi = zeros(n)
-        pi[j] = 1.0
-        pi0 = floor(x_[j])
-
-        # Build CGCP
-        # TODO: make this faster
-        @timeit timer "CGCP-build" cgcp = build_cgcp(
-            cgcp_optimizer,
-            m, n, sf.A, sf.b, sf.cones,
-            x_, pi, pi0,
-            nrm=nrm,
-            bridge_type=Float64
-        )
-        cgcp_moi = backend(cgcp)
-        nsolve += 1
-
-        # Solve CGCP
-        @timeit timer "CGCP-solve" MOI.optimize!(cgcp_moi)
-
-        # Check termination status
-        st = MOI.get(cgcp_moi, MOI.TerminationStatus())
-
-        # Get number of barrier iterations
-        nbariter += MOI.get(cgcp_moi, MOI.BarrierIterations())
-
-        if st != MOI.OPTIMAL
-            @warn "CGCP exited with status" st
-            continue
-        end
-
-        # Check if found violated cut
-        δ = objective_value(cgcp)
-
-        if δ >= -1e-4
-            # Cut is not violated
-            continue
-        end
-
-        v = value.(cgcp[:v])
-        norm(v, Inf) >= 1e2 && @warn "|v| is large: $(extrema(v))"
-        u0 = value(cgcp[:u0])
-        v0 = value(cgcp[:v0])
-        λ = value.(cgcp[:λ])
-        μ = value.(cgcp[:μ])
-
-        # Check that u0, v0 are not "too negative", otherwise reject the cut
-        (u0 >= -1e-5 && v0 >= -1e-5) || continue
-
-        # Clean u0, v0
-        u0 = max(0.0, u0)
-        v0 = max(0.0, v0)
-        (abs(u0) <= 1e-6) && (u0 = 0.0)
-        (abs(v0) <= 1e-6) && (v0 = 0.0)
-
-        a1 = -u0 .* pi
-        a2 = sf.A'v .+ v0 .* pi
-
-        # Check validity of conic multipliers
-        @timeit timer "CGCP-clean λ" for (kidx, k) in sf.cones
-            kd = MOI.dual_set(k)
-
-            if isa(kd, MOI.Nonnegatives)
-                # α[kidx[1]] = max(a1[kidx[1]], a2[kidx[1]])
-                λ[kidx[1]] = max(0.0, λ[kidx[1]])
-                μ[kidx[1]] = max(0.0, μ[kidx[1]])
-
-            elseif isa(kd, MOI.Nonpositives)
-                # α[kidx[1]] = min(a1[kidx[1]], a2[kidx[1]])
-                λ[kidx[1]] = min(0.0, λ[kidx[1]])
-                μ[kidx[1]] = min(0.0, μ[kidx[1]])
-
-            elseif isa(kd, MOI.Reals)
-                # Nothing to do
-                # α[kidx[1]] = 0.0
-
-            elseif isa(kd, MOI.Zeros)
-                # TODO
-                # abs(a1[kidx[1]] - a2[kidx[1]]) <= 1e-5 || @warn "|a1 - a2| = $(abs(a1[kidx[1]] - a2[kidx[1]])) but should be 0"
-                λ[kidx[1]] = 0.0
-                μ[kidx[1]] = 0.0
-
-            elseif isa(kd, MOI.SecondOrderCone)
-                # Shift dual multipliers if needed
-                λ[kidx[1]] = max(λ[kidx[1]], norm(λ[kidx[2:end]]))
-                μ[kidx[1]] = max(μ[kidx[1]], norm(μ[kidx[2:end]]))
-
-                # TODO: clean multipliers
-
-            elseif isa(kd, MOI.RotatedSecondOrderCone)
-                # start by shifting initial coordinates
-                λ[kidx[1]] = max(0.0, λ[kidx[1]])
-                λ[kidx[2]] = max(0.0, λ[kidx[2]])
-                # Check norm
-                η = 2 * λ[kidx[1]] * λ[kidx[2]] - sum(λ[kidx[3:end]] .^ 2)
-                if η < 0.0
-                    # Increase first two coordinates
-                    
-                end
-                @assert 2 * λ[kidx[1]] * λ[kidx[2]] - sum(λ[kidx[3:end]] .^ 2) >= -1e-7
-                @assert 2 * μ[kidx[1]] * μ[kidx[2]] - sum(μ[kidx[3:end]] .^ 2) >= -1e-7
-
-            else
-                @warn "Cone $(typeof(k)) not recognized in feasibility check"
-            end
-        end
-
-        # K* cut
-        β = min(-u0 * pi0, dot(sf.b, v) + v0 * (pi0 + 1))
-        if (iszero(u0) || iszero(v0)) && β <= 1e-6
-            @warn "Round $(ncalls[]): K* cut" j u0 v0 δ
-
-            # Dis-aggregate the cut
-            for (kidx, k) in sf.cones
-                
-                isa(k, NONLINEAR_CONE) || continue  # Skip linear constraints
-
-                if iszero(u0)
-                    λ_ = λ[kidx]
-                else 
-                    λ_ = μ[kidx]
-                end
-
-                # Skip zero components
-                norm(λ_) >= 1e-5 || continue
-
-                # Add K* cut
-                @timeit timer "Submit" MOI.submit(
-                    micp,
-                    MOI.UserCut(cbdata),
-                    MOI.ScalarAffineFunction(MOI.ScalarAffineTerm.(λ_, x[kidx]), 0.0),
-                    MOI.GreaterThan(0.0)
-                )
-            end
-
-            nkcuts += 1
-
-            # Stop the cut generation here
-            break
-        end
-
-        α = λ .- (u0 .* pi)
-        σ = α - a2
-
-        # Check that \mu ∈ K*
-        @timeit timer "CGCP-clean μ" for (kidx, k) in sf.cones
-            kd = MOI.dual_set(k)
-
-            if isa(kd, MOI.Nonnegatives)
-                σ[kidx[1]] >= -1e-5 || @warn "σ = $(σ[kidx[1]]) but should be ⩾ 0"
-                
-            elseif isa(kd, MOI.Nonpositives)
-                σ[kidx[1]] <=  1e-5 || @warn "σ = $(σ[kidx[1]]) but should be ⩽ 0"
-
-            elseif isa(kd, MOI.Reals)
-                # Nothing to do
-
-            elseif isa(kd, MOI.Zeros)
-                # TODO
-                # abs(σ[kidx[1]]) <= 1e-5 || @warn "σ = $(σ[kidx[1]]) but should be 0"
-
-            elseif isa(kd, MOI.SecondOrderCone)
-                # Shift dual multipliers if needed
-                σ[kidx[1]] >= norm(σ[kidx[2:end]], 2) - 1e-6 || @warn "σ1 - |σ| = $(σ[kidx[1]] - norm(σ[kidx[2:end]], 2)) but should be ⩾ 0"
-
-                # α[kidx[1]] += max(0.0, norm(σ[kidx[2:end]]) - σ[kidx[1]])
-
-            elseif isa(kd, MOI.RotatedSecondOrderCone)
-                # TODO
-                (
-                    (σ[kidx[1]] >= - 1e-8) && (σ[kidx[2]] >= - 1e-8)
-                    && (2 * σ[kidx[1]] * σ[kidx[2]] >= (sum(σ[kidx[3:end]] .^ 2) - 1e-6))
-                ) || @warn "RSOC multiplier invalid.\nσ1 = $(σ[kidx[1]]) (should be ⩾ 0)\nσ1 = $(σ[kidx[2]]) (should be ⩾ 0)\n2*σ1*σ1 - |σ|^2 = $(2 * σ[kidx[1]] * σ[kidx[2]] - sum(σ[kidx[3:end]] .^ 2)) (should be ⩾ 0)"
-
-            else
-                @warn "Cone $(typeof(k)) not recognized in feasibility check"
-            end
-        end
-
-        δ = dot(α, x_) - β
-
-        # Strengthening
-        # TODO: add option to strengthen or not
-        @timeit timer "Strengthen" if u0 + v0 > 1e-4
-            Atv = sf.A'v
-            for (kidx, k) in sf.cones
-
-                isa(k, NONLINEAR_CONE) && all(sf.vartypes_implied[kidx] .*  iszero.(x_[kidx])) >= 1 && @info "Could have strengthened a cone"
-                
-                isa(k, Union{MOI.Nonpositives, MOI.Nonnegatives}) || continue
-                j_ = kidx[1]
-
-                # Only strengthen integer variables that are at zero
-                (sf.vartypes_implied[j_] && iszero(x_[j_])) || continue
-
-                α[j_] = strengthen(Atv[j_], u0, v0, k)
-            end
-        end
-
-        # TODO: Proper cleaning and re-scaling for numerics
-        @timeit timer "CGCP-clean α" for j_ in 1:n
-            if abs(α[j_]) <= 1e-7 
-                α[j_] = 0.0
-            end
-        end
-        abs(β) <= 1e-8 && (β = 0.0)
-        r = norm(α, 2)
-
-        # TODO: book-keeping
-        α_ = sparse(α)
-        nzcoeffs += nnz(α_)
-
-        # TODO: check that cut does not cut optimal solution
-        z = (dot(α, x_micp) - β) / r
-        z >= -1e-6 || (@error("Optimal solution is cut by $z", norm(x_, 2), norm(α, 2), β, u0, v0, j, x_[j], f[j]); continue)
-
-        # Submit the cut
-        @timeit timer "Submit" MOI.submit(
-            micp,
-            MOI.UserCut(cbdata),
-            MOI.ScalarAffineFunction(MOI.ScalarAffineTerm.(α ./ r, x), 0.0),
-            MOI.GreaterThan(β / r)
-        )
-
-        ncuts += 1  # book-keeping
-
-    end  # cut-generation loop
-
-    # Log
-    tround = time() - tnow
-    ttot = time() - tstart
-    sparsity = nzcoeffs / ncuts
-    @info("Stats for round $(ncalls[])",
-        z_,
-        nsolve,
-        ncuts,
-        nkcuts,
-        nbariter,
-        sparsity,
-        tround,
-        ttot
-    )
-
-    # Book-keeping
-    ncgcp_solve[] += nsolve
-    ncuts_tot[] += ncuts
-    nkcuts_tot[] += nkcuts
-    nbaritertot[] += nbariter
-    ncalls[] += 1
-    return nothing
-end  # callback function
-
-
-function landp(
+function landp_closure(
     finst::String,
     micp_optimizer, cgcp_optimizer,
     time_limit::Float64, nrm::Symbol, max_rounds::Int;
@@ -374,33 +66,102 @@ function landp(
     MOI.set(micp, MOI.Silent(), !verbose)
 
     # Book-keeping
-    ncalls = Ref(0)
-    ncuts_tot = Ref(0)
-    nkcuts_tot = Ref(0)
-    ncgcp_solve = Ref(0)
-    nbaritertot = Ref(0)
+    ncalls = 0
+    ncuts_tot = 0
+    nkcuts_tot = 0
+    nrounds = 0
 
     # Set callback
-    tstart = time()
-    MOI.set(micp, MOI.UserCutCallback(),
-        cbdata -> landp_callback(
-            cbdata, micp, x_micp, sf, cgcp_optimizer,
-            max_rounds, nrm, timer, tstart, time_limit;
-            ncalls=ncalls,
-            ncuts_tot=ncuts_tot, nkcuts_tot=nkcuts_tot,
-            ncgcp_solve=ncgcp_solve,
-            nbaritertot=nbaritertot
+    x = sf.var_indices
+    function cblandp(cbdata)
+        ncalls += 1
+
+        nrounds > max_rounds && return nothing
+
+        # Get fractional point
+        x_ = MOI.get(micp, MOI.CallbackVariablePrimal(cbdata), x)
+
+        # K* cuts pre-check
+        H = CLaP.extract_conic_infeasibilities(x_, sf.cones) ./ 2
+        kflag = false
+        for ((kidx, k), η) in zip(sf.cones, H)
+            isa(k, CLaP.POLYHEDRAL_CONE) && continue
+
+            if η <= -5e-2
+                # Add K* cut
+                @assert isa(k, MOI.SecondOrderCone) "Only SOC are supported (is $k)"
+
+                λ = copy(x_[kidx])
+                λ[1] = norm(λ[2:end])
+                λ[2:end] .*= -1
+                λ ./= λ[1]
+
+                MOI.submit(
+                    micp,
+                    MOI.UserCut(cbdata),
+                    MOI.ScalarAffineFunction(MOI.ScalarAffineTerm.(λ, x[kidx]), 0.0),
+                    MOI.GreaterThan(0.0)
+                )
+                kflag = true
+            end
+        end
+
+        kflag && return nothing
+
+        nrounds += 1
+        # Compute cuts
+        Kcuts, Scuts = CLaP.lift_and_project(
+            x_, sf, cgcp_optimizer,
+            normalization=nrm,
+            kcut_pre_check=true,
+            kcut_post_check=true,
+            strengthen_flag=true,
+            timer=timer
         )
-    )
+
+        # Submit cuts
+        for (js, α, β) in Kcuts
+            MOI.submit(
+                micp,
+                MOI.UserCut(cbdata),
+                MOI.ScalarAffineFunction(MOI.ScalarAffineTerm.(α, x[js]), 0.0),
+                MOI.GreaterThan(β)
+            )
+        end
+
+        for (js, α, β) in Scuts
+            MOI.submit(
+                micp,
+                MOI.UserCut(cbdata),
+                MOI.ScalarAffineFunction(MOI.ScalarAffineTerm.(α, x[js]), 0.0),
+                MOI.GreaterThan(β)
+            )
+        end
+
+        # Book-keeping
+        nkcuts = length(Kcuts)
+        nscuts = length(Scuts)
+        @info "Stats for round $nrounds" nkcuts nscuts
+
+        nkcuts_tot += nkcuts
+        ncuts_tot += nscuts
+
+        return nothing
+    end
+
+    tstart = time()
+    MOI.set(micp, MOI.UserCutCallback(), cblandp)
 
     # Solve
     @timeit timer "MICP" MOI.optimize!(micp)
 
     # Result log
-    @info "User callback was called $(ncalls[]) times" ncuts_tot[] nkcuts_tot[] ncgcp_solve[] nbaritertot[] (nbaritertot[] / ncgcp_solve[])
+    @info "User callback was called $(ncalls[]) times" ncuts_tot[] nkcuts_tot[]
 
     @info MOI.get(micp, MOI.TerminationStatus())
     @info "Final bound: $(MOI.get(micp, MOI.ObjectiveBound()))"
+
+    return micp
 end
 
 function parse_commandline(cl_args)
@@ -500,7 +261,7 @@ function main(CLARGS)
     to = TimerOutput()
     @info "Warming up..."
     with_logger(Logging.NullLogger()) do  # this will de-activate logs
-        landp(
+        landp_closure(
             cl_args["finst"],
             micp_optimizer, cgcp_optimizer,
             30.0, cl_args["Normalization"], cl_args["Rounds"],
@@ -510,7 +271,7 @@ function main(CLARGS)
 
     # Real run
     to = TimerOutput()
-    landp(
+    landp_closure(
         cl_args["finst"],
         micp_optimizer, cgcp_optimizer,
         cl_args["TimeLimit"], cl_args["Normalization"], cl_args["Rounds"],
