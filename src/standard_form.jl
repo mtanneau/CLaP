@@ -8,7 +8,7 @@ const NONLINEAR_CONE = Union{
     MOI.SecondOrderCone, MOI.RotatedSecondOrderCone
 }
 const POLYHEDRAL_CONE = Union{
-    MOI.Zeros, MOI.Nonnegatives, MOI.Nonpositives
+    MOI.Zeros, MOI.Nonnegatives, MOI.Nonpositives, MOI.Reals
 }
 const MOI_CONES = Union{POLYHEDRAL_CONE, NONLINEAR_CONE}
 const SCALAR_SETS = Union{

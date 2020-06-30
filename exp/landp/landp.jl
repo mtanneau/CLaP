@@ -42,7 +42,9 @@ function landp_closure(
     finst::String,
     micp_optimizer, cgcp_optimizer,
     time_limit::Float64, nrm::Symbol, max_rounds::Int;
-    verbose::Bool=true, timer=TimerOutput()
+    verbose::Bool=true,
+    refine_oa::Bool=true, conic_feas_tol::Float64=1e-1,
+    timer=TimerOutput()
 )
     # Read model from file
     cbf = MOI.FileFormats.CBF.Model()
@@ -81,32 +83,33 @@ function landp_closure(
         # Get fractional point
         x_ = MOI.get(micp, MOI.CallbackVariablePrimal(cbdata), x)
 
-        # K* cuts pre-check
-        H = CLaP.extract_conic_infeasibilities(x_, sf.cones) ./ 2
-        kflag = false
-        for ((kidx, k), η) in zip(sf.cones, H)
-            isa(k, CLaP.POLYHEDRAL_CONE) && continue
-
-            if η <= -5e-2
-                # Add K* cut
+        # Refine outer approximation before separating cuts
+        @timeit timer "Refine OA" if refine_oa
+            H = CLaP.extract_conic_infeasibilities(x_, sf.cones) ./ 2
+            kflag = false
+            for ((kidx, k), η) in zip(sf.cones, H)
+                isa(k, CLaP.POLYHEDRAL_CONE) && continue
                 @assert isa(k, MOI.SecondOrderCone) "Only SOC are supported (is $k)"
 
-                λ = copy(x_[kidx])
-                λ[1] = norm(λ[2:end])
-                λ[2:end] .*= -1
-                λ ./= λ[1]
+                if η <= -conic_feas_tol / 2
+                    # Add K* cut
+                    λ = copy(x_[kidx])
+                    λ[1] = norm(λ[2:end])
+                    λ[2:end] .*= -1
+                    λ ./= λ[1]
 
-                MOI.submit(
-                    micp,
-                    MOI.UserCut(cbdata),
-                    MOI.ScalarAffineFunction(MOI.ScalarAffineTerm.(λ, x[kidx]), 0.0),
-                    MOI.GreaterThan(0.0)
-                )
-                kflag = true
+                    MOI.submit(
+                        micp,
+                        MOI.UserCut(cbdata),
+                        MOI.ScalarAffineFunction(MOI.ScalarAffineTerm.(λ, x[kidx]), 0.0),
+                        MOI.GreaterThan(0.0)
+                    )
+                    kflag = true
+                end
             end
-        end
 
-        kflag && return nothing
+            kflag && return nothing
+        end
 
         nrounds += 1
         # Compute cuts

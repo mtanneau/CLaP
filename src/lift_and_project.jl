@@ -60,7 +60,7 @@ function lift_and_project(
         @timeit timer "K*-cut pre-check" if kcut_pre_check && normalization == :Conic
             η_ = min(-f[j], f[j] - 1) / 2
 
-            kcut_detected = (η <= -f[j] / 2) || (η <= (f[j]-1)/2)
+            kcut_detected = (η <= -f[j] / 2) && (η <= (f[j]-1)/2)
             kcut_detected && @debug("K*-cut detected", η)
 
             if kcut_detected
@@ -87,7 +87,7 @@ function lift_and_project(
             end
         end
 
-        kcut_detected && break
+        kcut_detected && continue
 
         # Look for a split cut
         pi = zeros(n)
@@ -212,7 +212,7 @@ function lift_and_project(
                 push!(Kcuts, (kidx, λ_, 0.0))
             end
             @timeit timer "count" nkcuts_post += 1
-            break
+            continue
         end
 
         # TODO: strengthening
