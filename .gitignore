@@ -24,6 +24,7 @@ docs/site/
 Manifest.toml
 
 # Julia system image
+precompile.jl
 JuliaLandP.so
 
 # VS code files

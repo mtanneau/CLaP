@@ -41,34 +41,24 @@ cat exp/instances_misocp.txt | grep "flay" | parallel -j NJOBS --joblog exp/land
 
 * `MICPSolver`: MICP solver.
     Possible values are `CPLEX` and `Gurobi`
+    
 * `CGCPSolver`: CGCP solver.
     Possible values are `CPLEX`, `Gurobi` and `Mosek`.
+
 * `Normalization`: normalization condition in CGCP.
     Possible values are
     * `Alpha2`: α-normalization `|α| ⩽ 1`
-    * `Conic`: conic normalization `|λ| + |μ| + u0 + v0 ⩽ 1`
-    * `PureConic`: pure conic normalization `|λ| + |μ| ⩽ 1`
-* `Rounds`: Maximum rounds of cutting planes.
-    Once the callback is called that many times, it is de-activated.
+    * `Interior`: `α'γ ⩽ 1` where `γ = x* - x_` and `x*` is an interior point
+    * `Trivial`: `u0 + v0 ⩽ 1`
+    * `Standard`: `|λ| + |μ| + u0 + v0 ⩽ 1`
+    * `Uniform`: `|λ| + |μ| ⩽ 1`
+
+* `Rounds`: Maximum number of cutting plane rounds.
+    Note that K*-cut used to refine the outer approximation are not counted as rounds.
+
 * `TimeLimit`: Time limit, in seconds.
 
 To view more information, just run
 ```bash
 julia landp.jl --help
-```
-
-## Building a Julia sysimage
-
-```bash
-julia --project=@. --trace-compile=precompile.jl snoop.jl
-```
-then
-```julia
-using PackageCompiler
-PackageCompiler.create_sysimage([:JuMP, :MathOptInterface, :LinearAlgebra, :ArgParse, :TimerOutputs, :Gurobi, :CPLEX, :Logging, :Mosek, :MosekTools]; project="../..", sysimage_path="JuliaLandP.so", precompile_statements_file="precompile.jl")
-```
-
-To use the system image, simply add the `-JJuliaLandP.so` option when calling Julia, for instance:
-```
-julia -JJuliaLandP.so --project=@. landp.jl --CGCPSolver Gurobi --TimeLimit 120.0 --Rounds 10 ../../examples/dat/misocp2.cbf
 ```

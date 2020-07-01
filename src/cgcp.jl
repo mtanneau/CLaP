@@ -50,11 +50,9 @@ function build_cgcp(
     x_::Vector{Float64}, π::Vector{Float64}, π0::Float64;
     nrm::Symbol = :Conic,
     compact::Bool=true,
-    bridge_type::Union{Nothing, Type}=nothing
+    bridge_type::Union{Nothing, Type}=nothing,
+    xref::Vector{Float64}=Float64[]
 )
-    # Sanity checks
-    !(nrm == :Alpha2 && compact) || error("Normalization $nrm is not compatible with compact = $compact")
-
     # Some solvers do not support Rotated Second Order cones directly,
     # so we enable bridges as a (hopefully short-term) work-around
     cgcp = JuMP.direct_model(MOI.instantiate(optimizer, with_bridge_type=bridge_type))
@@ -125,7 +123,6 @@ function build_cgcp(
 
     # Objective and constraints
     if compact
-        
         @variable(cgcp, η1 >= 0)
         @variable(cgcp, η2 >= 0)
 
@@ -135,7 +132,6 @@ function build_cgcp(
         @objective(cgcp, Min, dot(x_, λ) - u0 * (dot(x_, π) - π0) + η1)
         
     else
-        nrm != :PureConic || error("Cannot used pure conic normalization with full CGCP.")
         # Full form
         @constraint(cgcp, f1a, α .==        λ .- (u0 .*  π))
         @constraint(cgcp, f1b, α .== A'v .+ μ .+ (v0 .*  π))
@@ -147,69 +143,168 @@ function build_cgcp(
     
     # Normalization
     if nrm == :Alpha2
-        # Alpha normalization
-        # |α| ⩽ 1
-        @constraint(cgcp, normalization, sum(α .^ 2) <= 1)
+        add_alpha_normalization(m, n, cgcp, cones, π, p=2)
 
-    elseif nrm == :Conic || nrm == :PureConic
-        #      Conic normalization: ρ'λ + ρ'μ + u0 + v0 ⩽ 1
-        # Pure conic normalization: ρ'λ + ρ'μ ⩽ 1            (do not normalize u0, v0)
+    elseif nrm == :Interior
+        length(xref) == length(x_) || error("xref has length $(length(xref))")
 
-        # if nrm == :PureConic
-        #     @constraint(cgcp, normalization0, u0 + v0 == 1)
-        # end
+        add_interior_normalization(m, n, cgcp, cones, xref - x_, π)
 
-        @constraint(cgcp, normalization, 0 <= 1)
+    elseif nrm == :Trivial
+        add_trivial_normalization(m, n, cgcp, cones)
 
-        if nrm == :Conic
-            set_normalized_coefficient(normalization, u0, 1.0)
-            set_normalized_coefficient(normalization, v0, 1.0)
-        end
-        
-        for (kidx, k) in cones
-            kd = MOI.dual_set(k)
-            if isa(kd, MOI.Nonnegatives)
-                set_normalized_coefficient(normalization, λ[kidx[1]], 1.0)
-                set_normalized_coefficient(normalization, μ[kidx[1]], 1.0)
+    elseif nrm == :Standard
+        add_standard_normalization(m, n, cgcp, cones)
 
-            elseif isa(kd, MOI.Nonpositives)
-                set_normalized_coefficient(normalization, λ[kidx[1]], -1.0)
-                set_normalized_coefficient(normalization, μ[kidx[1]], -1.0)
+    elseif nrm == :Uniform
+        add_uniform_normalization(m, n, cgcp, cones)
 
-            elseif isa(kd, MOI.Zeros)
-                # Nothing to add here
+    elseif nrm == :Combined
+        add_combined_normalization(m, n, cgcp, cones, π)
 
-            elseif isa(kd, MOI.Reals)
-                # Bound the L1-norm
-                # TODO: these should be removed from CGCP
-                j = kidx[1]
-                t = @variable(cgcp)
-                @constraint(cgcp, t >=  λ[j])
-                @constraint(cgcp, t >= -λ[j])
-                s = @variable(cgcp)
-                @constraint(cgcp, s >=  μ[j])
-                @constraint(cgcp, s >= -μ[j])
-                set_normalized_coefficient(normalization, t, 1.0)
-                set_normalized_coefficient(normalization, s, 1.0)
-
-            elseif isa(kd, MOI.SecondOrderCone)
-                set_normalized_coefficient(normalization, λ[kidx[1]], 1.0)
-                set_normalized_coefficient(normalization, μ[kidx[1]], 1.0)
-
-            elseif isa(kd, MOI.RotatedSecondOrderCone)
-                set_normalized_coefficient(normalization, λ[kidx[1]], 1.0)
-                set_normalized_coefficient(normalization, λ[kidx[2]], 1.0)
-                set_normalized_coefficient(normalization, μ[kidx[1]], 1.0)
-                set_normalized_coefficient(normalization, μ[kidx[2]], 1.0)
-
-            else
-                error("Conic normalization for dual cone $(typeof(kd)) is not supported")
-            end
-        end
-    
     else
-        error("Normalization $nrm is not supported.")
+        error("Normalization $nrm is not supported")
     end
+    return cgcp
+end
+
+function add_alpha_normalization(m::Int, n::Int, cgcp, cones, π; p::Real=2)
+
+    λ, u0 = cgcp[:λ], cgcp[:u0]
+    if p == 2
+        @constraint(cgcp, normalization, dot(λ + u0 .* π, λ + u0 .* π) <= 1)
+    else
+        error("Alpha normalization only supported for p={2} (is $p)")
+    end
+
+    return cgcp
+end
+
+"""
+    Interior normalization
+
+
+"""
+function add_interior_normalization(m::Int, n::Int, cgcp, cones, γ, π)
+    λ, u0 = cgcp[:λ], cgcp[:u0]
+    @constraint(cgcp, normalization, dot(γ, λ) - u0 * dot(γ, π) <= 1)
+
+    return cgcp
+end
+
+"""
+    add_trivial_normalization
+
+`u0 + v0 <= 1`
+"""
+function add_trivial_normalization(m::Int, n::Int, cgcp, cones)
+    @constraint(cgcp, normalization, cgcp[:u0] + cgcp[:v0] <= 1)
+    return cgcp
+end
+
+"""
+    add_standard_normalization
+
+`ρ'λ + ρ'μ + u0 + v0 ⩽ 1`
+"""
+function add_standard_normalization(m::Int, n::Int, cgcp, cones)
+    ρ = zeros(n)
+    for (kidx, k) in cones
+        kd = MOI.dual_set(k)
+
+        if isa(kd, MOI.Nonnegatives)
+            ρ[kidx] .= 1
+        elseif isa(kd, MOI.Nonpositives)
+            ρ[kidx] .= -1
+        elseif isa(kd, MOI.Zeros)
+            # Nothing to do
+        elseif isa(kd, MOI.Reals)
+            # Should be treated as equality constraints, i.e.,
+            # set one of the multipliers to 0 and let the other one free
+            @warn "Some variables are fixed. Should treat them as equality constraints" maxlog = 1
+        elseif isa(kd, MOI.SecondOrderCone)
+            ρ[kidx[1]] = 1
+        elseif isa(kd, MOI.RotatedSecondOrderCone)
+            ρ[kidx[1:2]] .= 1
+        else
+            error("Standard normalization for cone $(typeof(k)) is not supported")
+        end
+    end
+
+    λ, μ = cgcp[:λ], cgcp[:μ]
+    @constraint(cgcp, normalization, dot(ρ, λ) + dot(ρ, μ) + cgcp[:u0] + cgcp[:v0] <= 1)
+    
+    return cgcp
+end
+
+"""
+    add_uniform_normalization
+
+`ρ'λ + ρ'μ ⩽ 1`
+"""
+function add_uniform_normalization(m::Int, n::Int, cgcp, cones)
+    ρ = zeros(n)
+    for (kidx, k) in cones
+        kd = MOI.dual_set(k)
+
+        if isa(kd, MOI.Nonnegatives)
+            ρ[kidx] .= 1
+        elseif isa(kd, MOI.Nonpositives)
+            ρ[kidx] .= -1
+        elseif isa(kd, MOI.Zeros)
+            # Nothing to do
+        elseif isa(kd, MOI.Reals)
+            # Should be treated as equality constraints, i.e.,
+            # set one of the multipliers to 0 and let the other one free
+            
+        elseif isa(kd, MOI.SecondOrderCone)
+            ρ[kidx[1]] = 1
+        elseif isa(kd, MOI.RotatedSecondOrderCone)
+            ρ[kidx[1:2]] .= 1
+        else
+            error("Uniform normalization for cone $(typeof(k)) is not supported")
+        end
+    end
+
+    λ, μ = cgcp[:λ], cgcp[:μ]
+    @constraint(cgcp, normalization, dot(ρ, λ) + dot(ρ, μ) <= 1)
+
+    return cgcp
+end
+
+function add_combined_normalization(m::Int, n::Int, cgcp, cones, π)
+    ρ = zeros(n)
+    for (kidx, k) in cones
+        kd = MOI.dual_set(k)
+
+        if isa(kd, MOI.Nonnegatives)
+            ρ[kidx] .= 1
+        elseif isa(kd, MOI.Nonpositives)
+            ρ[kidx] .= -1
+        elseif isa(kd, MOI.Zeros)
+            # Nothing to do
+        elseif isa(kd, MOI.Reals)
+            # Should be treated as equality constraints, i.e.,
+            # set one of the multipliers to 0 and let the other one free
+        elseif isa(kd, MOI.SecondOrderCone)
+            ρ[kidx[1]] = 1
+        elseif isa(kd, MOI.RotatedSecondOrderCone)
+            ρ[kidx[1:2]] .= 1
+        else
+            error("Uniform normalization for cone $(typeof(k)) is not supported")
+        end
+    end
+
+    λ, μ = cgcp[:λ], cgcp[:μ]
+    u0, v0 = cgcp[:u0], cgcp[:v0]
+
+    if iszero(dot(ρ, π))
+        @constraint(cgcp, normalization, dot(ρ, λ) <= 1)
+    else
+        @constraint(cgcp, normalization, dot(ρ, λ) + u0 <= 1)
+    end
+
+    @constraint(cgcp, normalization2, dot(ρ, λ) + dot(ρ, μ) + u0 + v0 <= 100)
 
     return cgcp
 end
