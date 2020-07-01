@@ -38,9 +38,33 @@ using CLaP
 
 import Base.RefValue
 
+function compute_analytic_center(sf, optimizer)
+    model = Model(optimizer)
+    m, n = size(sf.A)
+
+    # Build continuous relaxation
+    x = Vector{VariableRef}(undef, n)
+
+    for (kidx, k) in sf.cones
+        d = MOI.dimension(k)
+        x[kidx] .= @variable(model, [1:d] in k)
+    end
+
+    @constraint(model, sf.A*x .== sf.b)
+
+    @objective(model, Min, 0)
+
+    optimize!(model)
+
+    xref = value.(x)
+
+    return xref
+end
+
 function landp_closure(
     finst::String,
-    micp_optimizer, cgcp_optimizer,
+    micp_optimizer::MOI.OptimizerWithAttributes,
+    cgcp_optimizer::MOI.OptimizerWithAttributes,
     time_limit::Float64, nrm::Symbol, max_rounds::Int;
     verbose::Bool=true,
     refine_oa::Bool=true, conic_feas_tol::Float64=1e-1,
@@ -53,13 +77,16 @@ function landp_closure(
     # Convert to standard form
     @timeit timer "Build SF" sf = build_standard_form(micp_optimizer, cbf, bridge_type=Float64)
 
+    # Compute analytic center
+    xref = compute_analytic_center(sf, micp_optimizer)
+
     # TODO: add pre-processing option
     @timeit timer "Prepross" extract_implied_integer(sf)
     @info "Pre-processing: $(sum(sf.vartypes)) integer variables ($(sum(sf.vartypes_implied)) implied integers)"
 
     # TODO: add cut validity checker option
-    x_micp = readdlm(joinpath(@__DIR__, "../cplex_micp/res/$(basename(finst)[1:end-4]).sol"))
-    @info "MICP objective value: $(dot(sf.c, x_micp))"
+    # x_micp = readdlm(joinpath(@__DIR__, "../cplex_micp/res/$(basename(finst)[1:end-4]).sol"))
+    # @info "MICP objective value: $(dot(sf.c, x_micp))"
 
     # Set some parameters
     m, n = size(sf.A)
@@ -75,6 +102,8 @@ function landp_closure(
 
     # Set callback
     x = sf.var_indices
+    tstart = time()
+
     function cblandp(cbdata)
         ncalls += 1
 
@@ -82,6 +111,7 @@ function landp_closure(
 
         # Get fractional point
         x_ = MOI.get(micp, MOI.CallbackVariablePrimal(cbdata), x)
+        z_ = dot(sf.c, x_)  # Current lower bound
 
         # Refine outer approximation before separating cuts
         @timeit timer "Refine OA" if refine_oa
@@ -89,9 +119,10 @@ function landp_closure(
             kflag = false
             for ((kidx, k), η) in zip(sf.cones, H)
                 isa(k, CLaP.POLYHEDRAL_CONE) && continue
-                @assert isa(k, MOI.SecondOrderCone) "Only SOC are supported (is $k)"
+                @assert isa(k, MOI.SecondOrderCone) "Only (R)SOC are supported (is $k)"
 
                 if η <= -conic_feas_tol / 2
+
                     # Add K* cut
                     λ = copy(x_[kidx])
                     λ[1] = norm(λ[2:end])
@@ -119,7 +150,8 @@ function landp_closure(
             kcut_pre_check=true,
             kcut_post_check=true,
             strengthen_flag=true,
-            timer=timer
+            timer=timer,
+            xref=xref
         )
 
         # Submit cuts
@@ -140,11 +172,11 @@ function landp_closure(
                 MOI.GreaterThan(β)
             )
         end
-
+        
         # Book-keeping
         nkcuts = length(Kcuts)
         nscuts = length(Scuts)
-        @info "Stats for round $nrounds" nkcuts nscuts
+        @info "Stats for round $nrounds" nkcuts nscuts z_
 
         nkcuts_tot += nkcuts
         ncuts_tot += nscuts
@@ -152,7 +184,7 @@ function landp_closure(
         return nothing
     end
 
-    tstart = time()
+    
     MOI.set(micp, MOI.UserCutCallback(), cblandp)
 
     # Solve
@@ -182,7 +214,7 @@ function parse_commandline(cl_args)
         "--Normalization"
             help = "Normalization condition"
             arg_type = Symbol
-            default = :Conic
+            default = :Standard
         "--Rounds"
             help = "Maximum number of cutting plane rounds"
             arg_type = Int

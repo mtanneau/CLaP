@@ -17,7 +17,8 @@ function lift_and_project(
     strengthen_flag::Bool=true,
     ϵ_integer::Float64=1e-4,
     ϵ_cut_violation::Float64=1e-4,
-    timer=TimerOutput()
+    timer=TimerOutput(),
+    xref::Vector{Float64}=Float64[]
 )
     Kcuts = Tuple{Vector{Int}, Vector{Float64}, Float64}[]  # K*    cuts
     Scuts = Tuple{Vector{Int}, Vector{Float64}, Float64}[]  # Split cuts
@@ -57,7 +58,7 @@ function lift_and_project(
 
         kcut_detected = false
         # Early check for K* cut
-        @timeit timer "K*-cut pre-check" if kcut_pre_check && normalization == :Conic
+        @timeit timer "K*-cut pre-check" if kcut_pre_check && normalization == :Standard
             η_ = min(-f[j], f[j] - 1) / 2
 
             kcut_detected = (η <= -f[j] / 2) && (η <= (f[j]-1)/2)
@@ -76,8 +77,6 @@ function lift_and_project(
                         λ[1] = norm(λ[2:end])
                         λ[2:end] .*= -1
                         λ ./= λ[1]
-
-                        # @info "K* cut at pre-check" ηi dot(λ, x_[kidx])
 
                         # Record K* cut
                         push!(Kcuts, (kidx, λ, 0.0))
@@ -100,7 +99,8 @@ function lift_and_project(
             m, n, sf.A, sf.b, sf.cones,
             x_, pi, pi0,
             nrm=normalization,
-            bridge_type=Float64
+            bridge_type=Float64,
+            xref=xref
         )
         cgcp_moi = backend(cgcp)
 
@@ -195,7 +195,7 @@ function lift_and_project(
 
         # Check for K* cut
         @timeit timer "K*-cut post-check" if kcut_post_check && (iszero(u0) || iszero(v0)) && β <= 1e-6
-            @info "K*-cut" u0 v0 η kcut_detected δ f[j] j
+            @debug "K*-cut" u0 v0 η kcut_detected δ f[j] j
             # Dis-aggregate the cut
             for (kidx, k) in sf.cones
                 if iszero(u0)
