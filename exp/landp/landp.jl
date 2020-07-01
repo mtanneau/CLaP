@@ -40,6 +40,7 @@ import Base.RefValue
 
 function compute_analytic_center(sf, optimizer)
     model = Model(optimizer)
+    set_optimizer_attribute(model, MOI.Silent(), true)
     m, n = size(sf.A)
 
     # Build continuous relaxation
@@ -210,7 +211,7 @@ function parse_commandline(cl_args)
         "--CGCPSolver"
             help = "CGCP solver"
             arg_type = Symbol
-            default = :CPLEX
+            default = :Gurobi
         "--Normalization"
             help = "Normalization condition"
             arg_type = Symbol
