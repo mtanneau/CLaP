@@ -111,16 +111,21 @@ function lift_and_project(
 
         # Check termination status
         st = MOI.get(cgcp_moi, MOI.TerminationStatus())
-        if st != MOI.OPTIMAL
-            @warn "CGCP exited with status" st
+        pst = MOI.get(cgcp_moi, MOI.PrimalStatus())
+        if !(
+            (pst == MOI.FEASIBLE_POINT)
+            || (st == MOI.DUAL_INFEASIBLE && pst == MOI.INFEASIBILITY_CERTIFICATE)
+        )
+            @warn "CGCP exited with status" st pst
             continue
         end
 
         # Check if found violated cut
         δ = objective_value(cgcp)
         @debug "Cut violation: $δ"
-        if δ >= -ϵ_cut_violation
+        if δ >= -ϵ_cut_violation && st != MOI.DUAL_INFEASIBLE
             # Cut is not violated
+            @info "No violated cut" δ st pst
             continue
         end
 
