@@ -68,7 +68,7 @@ function landp_closure(
     cgcp_optimizer::MOI.OptimizerWithAttributes,
     time_limit::Float64, nrm::Symbol, max_rounds::Int;
     verbose::Bool=true,
-    refine_oa::Bool=true, conic_feas_tol::Float64=1e-1,
+    max_refine_rounds::Int=50, conic_feas_tol::Float64=1e-1,
     timer=TimerOutput()
 )
     # Read model from file
@@ -97,13 +97,16 @@ function landp_closure(
 
     # Book-keeping
     ncalls = 0
-    ncuts_tot = 0
+    nrefine = 0
+    nscuts_tot = 0
     nkcuts_tot = 0
+    nnz_kcut_tot = 0
+    nnz_scut_tot = 
     nrounds = 0
 
     # Set callback
     x = sf.var_indices
-    tstart = time()
+    tstart = 0.0
 
     function cblandp(cbdata)
         ncalls += 1
@@ -115,7 +118,7 @@ function landp_closure(
         z_ = dot(sf.c, x_)  # Current lower bound
 
         # Refine outer approximation before separating cuts
-        @timeit timer "Refine OA" if refine_oa
+        @timeit timer "Refine OA" if nrefine < max_refine_rounds
             H = CLaP.extract_conic_infeasibilities(x_, sf.cones) ./ 2
             kflag = false
             for ((kidx, k), η) in zip(sf.cones, H)
@@ -140,10 +143,13 @@ function landp_closure(
                 end
             end
 
+            nrefine += kflag
             kflag && return nothing
         end
 
         nrounds += 1
+        nrefine = 0  # reset refine counter
+
         # Compute cuts
         Kcuts, Scuts = CLaP.lift_and_project(
             x_, sf, cgcp_optimizer,
@@ -156,7 +162,9 @@ function landp_closure(
         )
 
         # Submit cuts
+        nnz_kcut = 0
         for (js, α, β) in Kcuts
+            nnz_kcut += length(α)
             MOI.submit(
                 micp,
                 MOI.UserCut(cbdata),
@@ -165,7 +173,9 @@ function landp_closure(
             )
         end
 
+        nnz_scut = 0
         for (js, α, β) in Scuts
+            nnz_scut += length(α)
             MOI.submit(
                 micp,
                 MOI.UserCut(cbdata),
@@ -177,10 +187,13 @@ function landp_closure(
         # Book-keeping
         nkcuts = length(Kcuts)
         nscuts = length(Scuts)
-        @info "Stats for round $nrounds" nkcuts nscuts z_
+        t_ = time() - tstart
+        @info "Stats for round $nrounds" nkcuts nscuts z_ t_ nnz_kcut nnz_scut
 
         nkcuts_tot += nkcuts
-        ncuts_tot += nscuts
+        nscuts_tot += nscuts
+        nnz_scut_tot += nnz_scut
+        nnz_kcut_tot += nnz_kcut
 
         return nothing
     end
@@ -189,10 +202,11 @@ function landp_closure(
     MOI.set(micp, MOI.UserCutCallback(), cblandp)
 
     # Solve
+    tstart = time()
     @timeit timer "MICP" MOI.optimize!(micp)
 
     # Result log
-    @info "User callback was called $(ncalls[]) times" ncuts_tot[] nkcuts_tot[]
+    @info "User callback was called $(ncalls[]) times" nscuts_tot nnz_scut_tot nkcuts_tot nnz_kcut_tot
 
     @info MOI.get(micp, MOI.TerminationStatus())
     @info "Final bound: $(MOI.get(micp, MOI.ObjectiveBound()))"
@@ -300,7 +314,7 @@ function main(CLARGS)
         landp_closure(
             cl_args["finst"],
             micp_optimizer, cgcp_optimizer,
-            30.0, cl_args["Normalization"], cl_args["Rounds"],
+            10.0, cl_args["Normalization"], 2,
             verbose=false, timer = to
         )
     end
