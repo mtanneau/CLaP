@@ -40,6 +40,7 @@ function lift_and_project(
     f = min.(ceil.(x_) .- x_, x_ .- floor.(x_))
     f .*= sf.vartypes
     p = sortperm(f, rev=true)
+    @debug extrema(f)
 
     # Check if ̄x is conic feasible
     @timeit timer "Conic infeas." H = extract_conic_infeasibilities(x_, sf.cones) ./ 2
@@ -68,6 +69,7 @@ function lift_and_project(
                 for (ηi, (kidx, k)) in zip(H, sf.cones)
                     if ηi <= η
                         # Polyhedral cones are 
+                        @debug "K* cut found" x_[kidx] k kidx ηi
                         isa(k, POLYHEDRAL_CONE) && continue
                         
                         @assert isa(k, MOI.SecondOrderCone) "Only SOC are supported (is $k)"
@@ -125,7 +127,7 @@ function lift_and_project(
         @debug "Cut violation: $δ"
         if δ >= -ϵ_cut_violation && st != MOI.DUAL_INFEASIBLE
             # Cut is not violated
-            @info "No violated cut" δ st pst
+            @debug "No violated cut" δ st pst
             continue
         end
 
@@ -288,7 +290,7 @@ function epigraph_violation(x, k::MOI.Nonpositives)
         "x has length $(length(x)) but cone has dimension $(MOI.dimension(k))"
     ))
 
-    return maximum(x)
+    return -maximum(x)
 end
 
 function epigraph_violation(x, k::MOI.Reals)
