@@ -250,6 +250,8 @@ function main(CLARGS)
     cl_args = parse_commandline(CLARGS)
     @info("User options", cl_args)
 
+    BLAS.set_num_threads(1)
+
     # Set solvers
     if cl_args["MICPSolver"] == :CPLEX
         micp_optimizer = MOI.OptimizerWithAttributes(

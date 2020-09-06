@@ -201,7 +201,8 @@ function lift_and_project(
         δ = dot(α, x_) - β
 
         # Check for K* cut
-        @timeit timer "K*-cut post-check" if kcut_post_check && (iszero(u0) || iszero(v0)) && β <= 1e-6
+        kcut_flag = (iszero(u0) && β <= 1e-6) || (iszero(v0) && (β - dot(sf.b, v)) <= 1e-6)
+        @timeit timer "K*-cut post-check" if kcut_post_check && kcut_flag
             @debug "K*-cut" u0 v0 η kcut_detected δ f[j] j
             # Dis-aggregate the cut
             for (kidx, k) in sf.cones

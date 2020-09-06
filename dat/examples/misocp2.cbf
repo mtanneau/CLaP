@@ -1,0 +1,49 @@
+# Mixed-integer second-order cone problem:
+# min    -x1 - x2
+# s.t.   
+# 		t <= 1.1
+# 		0 <= x1 <= 1
+#		0 <= x2 <= 1
+# 		(t1, x1, x2) in Q3
+# 		x1, x2 integer
+# 
+# The optimal integer solution is (0, 1, 1) with objective value -2
+
+VER
+2
+
+OBJSENSE
+MIN
+
+VAR
+3 1
+Q 3
+
+INT
+2
+1
+2
+
+CON
+5 1
+L+ 5
+
+OBJACOORD
+2
+1 -1.0
+2 -1.0
+
+ACOORD
+5
+0 0 -1.0
+1 1 1.0
+2 2 1.0
+3 1 -1.0
+4 2 -1.0
+
+BCOORD
+3
+0 1.0
+3 1.0
+4 1.0
+

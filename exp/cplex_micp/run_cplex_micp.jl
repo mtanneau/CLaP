@@ -4,8 +4,7 @@ using SparseArrays
 
 import CPLEX
 
-include(joinpath(@__DIR__, "../../src/CLaP.jl"))
-using .CLaP
+using CLaP
 
 # Read model from file
 cbf = MOI.FileFormats.CBF.Model()
@@ -27,6 +26,7 @@ sf = build_standard_form(micp_optimizer, cbf, bridge_type=Float64)
 micp = sf.model
 
 # Time limit
+# TODO: provide as input
 MOI.set(micp, MOI.TimeLimitSec(), 3600.0)  # 1-hour time limit
 
 MOI.optimize!(micp)
@@ -35,6 +35,7 @@ MOI.optimize!(micp)
 @show MOI.get(micp, MOI.ObjectiveBound())       # Lower bound
 
 # Export solution
+# TODO: check for solution status first
 x_micp = MOI.get(micp, MOI.VariablePrimal(), sf.var_indices)
 
 writedlm(joinpath(@__DIR__, "res/$finst.sol"), x_micp)
