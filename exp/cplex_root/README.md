@@ -30,5 +30,8 @@ where `N` is the (integer) number of cut passes, i.e., `CPXPARAM_MIP_Limits_CutP
 ## Running all instances
 
 ```bash
-cat ../instances_misocp.txt | parallel -j1 "julia --project=@. run_cplex_root.jl ../../dat/cblib/{}.cbf <N> > log/cpx_rootLaP_<N>_{}.log 2>&1"
+cat exp/instances_misocp.txt | parallel -j1 "julia --project exp/cplex_root/run_cplex_root.jl dat/cblib/{}.cbf <N> <T> > exp/cplex_root/log/cpx_rootLaP_<N>_{}.log 2>&1"
 ```
+where
+* `N` is the maximum number of CPLEX cut passes (default to `200`).
+* `T` is the time limit, in seconds (defaults to `3600`).
