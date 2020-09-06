@@ -1,0 +1,67 @@
+# This problem is described in Example 1 of
+# [Kilinc et al, "Lift-and-project cuts for convex mixed-integer non-linear programs", 2017]
+# The original formulation is a MI-QCP, which we reformulate as a MISOCP
+# 
+# Problem:
+# min    -x1 - x2
+# s.t.   
+# 		0 <= x1 <= 1
+#		0 <= x2 <= 1
+# 		7 x1 + 8 x2 <= 9
+# 		8 x1 + 7 x2 <= 9
+# 		(t, x1, x2) in Q3, t <= 0.9   # x1^2 + x2^2 <= (9/10)^2 in the original paper
+# 		x1, x2 integer
+# 
+# Conic relaxation:
+#       z_ = -1.2
+#       x_ = (t, 0.6, 0.6)  # SOC constraint will not be active
+# Conic Split cut:
+#       
+
+VER
+2
+
+OBJSENSE
+MIN
+
+VAR
+3 2
+L+ 2
+F 1
+
+INT
+2
+0
+1
+
+CON
+8 3
+L+ 4
+Q 3
+L+ 1
+
+OBJACOORD
+2
+0 -1.0
+1 -1.0
+
+ACOORD
+10
+0 0  -1.0
+1 1  -1.0
+2 0  -7.0
+2 1  -8.0
+3 0  -8.0
+3 1  -7.0
+4 2  1.0
+5 0  1.0
+6 1  1.0
+7 2  -1.0
+
+BCOORD
+5
+0 1.0
+1 1.0
+2 9.0
+3 9.0
+7 0.9

@@ -1,0 +1,45 @@
+# Problematic instance from [BenTal, Nemirovski 2001] (example 1.4.3),
+#   with added integrality constraint.
+# The continuous relaxation is dual infeasible.
+# 
+# Problem:
+# min    x2
+# s.t.   
+# 		(x1, x2, x1) in Q3
+#       x1 integer
+# 
+# Conic relaxation:
+#       z_ = 0
+#       x_ = (0, 0)    
+
+VER
+2
+
+OBJSENSE
+MIN
+
+VAR
+2 1
+F 2
+
+INT
+1
+0
+
+CON
+3 1
+Q 3
+
+OBJACOORD
+1
+1 1.0
+
+ACOORD
+3
+0 0  1.0
+1 1  1.0
+2 0  1.0
+
+BCOORD
+1
+0 0.0
